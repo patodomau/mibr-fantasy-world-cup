@@ -9,7 +9,7 @@ The app is built for:
 - Discord avatar capture for ranking/admin identification
 - Neon Postgres persistence under `mibr_fantasy_world_cup.*`
 - Vercel deployment and cron routes
-- fixture/status sync through a football data provider
+- fixture/status sync through ESPN Scoreboard
 
 ## Current MVP
 
@@ -28,9 +28,9 @@ The app is built for:
   - score values must be positive integers or zero
   - selected result must match the guessed score
 
-## Data Source Plan
+## Data Source
 
-FIFA remains the reference source for official schedule decisions. Runtime fixture/status/score updates should use a proper data API. The first supported adapter is `football-data.org`, using the `WC` competition and `2026` season.
+Runtime fixture, status, and score updates use the public ESPN Scoreboard endpoint for `fifa.world`.
 
 Vercel Hobby accounts only support daily cron jobs, so this app uses one daily sync. The cron route runs once per day in UTC and refreshes the surrounding date range.
 
@@ -66,9 +66,6 @@ NEXTAUTH_SECRET=replace-with-a-long-random-secret
 DISCORD_CLIENT_ID=replace-with-discord-client-id
 DISCORD_CLIENT_SECRET=replace-with-discord-client-secret
 CRON_SECRET=replace-with-random-cron-secret
-FOOTBALL_DATA_API_TOKEN=replace-with-provider-token
-FOOTBALL_DATA_COMPETITION=WC
-FOOTBALL_DATA_SEASON=2026
 ```
 
 Apply DB schema:

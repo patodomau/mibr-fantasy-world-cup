@@ -2,7 +2,6 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 import { neon } from "@neondatabase/serverless";
-import { mockMatches } from "@/data/mock-world-cup";
 import { optionalEnv } from "@/lib/env";
 import {
   buildMatchKey,
@@ -13,21 +12,13 @@ import {
   type Team,
   type WinnerPick,
 } from "@/lib/fantasy-types";
-import { fetchFootballDataMatches } from "@/lib/football-data";
 
 type Sql = ReturnType<typeof neon<false, false>>;
 
-type SourceName =
-  | "espn-scoreboard"
-  | "football-data"
-  | "wikipedia-fifa-fixtures"
-  | "ge-globo"
-  | "bing-sports"
-  | "mock-backup";
+type SourceName = "espn-scoreboard";
 
 type ObservedMatch = Match & {
   source: SourceName;
-  sourcePriority: number;
   raw: Record<string, unknown>;
 };
 
@@ -38,33 +29,6 @@ type RawObservation = {
   message?: string;
   payload?: unknown;
   normalizedMatches?: number;
-};
-
-type GloboTeam = {
-  escudo?: string;
-  id?: number;
-  nome_popular?: string;
-  sigla?: string;
-};
-
-type GloboMatch = {
-  data_realizacao?: string;
-  equipes?: {
-    mandante?: GloboTeam;
-    visitante?: GloboTeam;
-  };
-  id?: number;
-  jogo_ja_comecou?: boolean;
-  placar_oficial_mandante?: number | null;
-  placar_oficial_visitante?: number | null;
-  sede?: {
-    nome_popular?: string;
-  };
-};
-
-type GloboGroup = {
-  nome_grupo?: string;
-  lista_jogos?: GloboMatch[];
 };
 
 type EspnTeam = {
@@ -114,49 +78,6 @@ const fetchHeaders = {
 
 const espnScoreboardUrl = "https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard";
 const espnFullScheduleDates = "20260611-20260719";
-
-type FieldGuess = {
-  selected: string;
-  values: Record<string, string[]>;
-  confidence: number;
-  selectedWeight: number;
-  competingWeight: number;
-};
-
-const wikipediaFixturePages = [
-  "2026_FIFA_World_Cup_Group_A",
-  "2026_FIFA_World_Cup_Group_B",
-  "2026_FIFA_World_Cup_Group_C",
-  "2026_FIFA_World_Cup_Group_D",
-  "2026_FIFA_World_Cup_Group_E",
-  "2026_FIFA_World_Cup_Group_F",
-  "2026_FIFA_World_Cup_Group_G",
-  "2026_FIFA_World_Cup_Group_H",
-  "2026_FIFA_World_Cup_Group_I",
-  "2026_FIFA_World_Cup_Group_J",
-  "2026_FIFA_World_Cup_Group_K",
-  "2026_FIFA_World_Cup_Group_L",
-  "2026_FIFA_World_Cup_knockout_stage",
-  "2026_FIFA_World_Cup_final",
-];
-
-const sourcePriority: Record<SourceName, number> = {
-  "espn-scoreboard": 120,
-  "football-data": 100,
-  "ge-globo": 95,
-  "wikipedia-fifa-fixtures": 80,
-  "bing-sports": 45,
-  "mock-backup": 10,
-};
-
-const stageBySectionPrefix: Array<[RegExp, Stage]> = [
-  [/^R32-/, "ROUND_OF_32"],
-  [/^R16-/, "ROUND_OF_16"],
-  [/^QF/, "QUARTER_FINALS"],
-  [/^SF/, "SEMI_FINALS"],
-  [/^3rd$/i, "THIRD_PLACE"],
-  [/^Final$/i, "FINAL"],
-];
 
 const teamCatalog: Record<string, { name: string; shortName?: string; flagCode: string }> = {
   ALG: { name: "Algeria", flagCode: "dz" },
@@ -340,70 +261,6 @@ function stableHash(payload: unknown) {
   return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
 }
 
-function extractJsAssignmentArray(scriptText: string, variableName: string) {
-  const marker = `const ${variableName} =`;
-  const markerIndex = scriptText.indexOf(marker);
-  if (markerIndex < 0) {
-    return null;
-  }
-
-  const start = scriptText.indexOf("[", markerIndex + marker.length);
-  if (start < 0) {
-    return null;
-  }
-
-  let depth = 0;
-  let quote: string | null = null;
-  let escaped = false;
-  for (let index = start; index < scriptText.length; index += 1) {
-    const char = scriptText[index];
-    if (quote) {
-      if (escaped) {
-        escaped = false;
-      } else if (char === "\\") {
-        escaped = true;
-      } else if (char === quote) {
-        quote = null;
-      }
-      continue;
-    }
-
-    if (char === '"' || char === "'") {
-      quote = char;
-      continue;
-    }
-
-    if (char === "[") {
-      depth += 1;
-    } else if (char === "]") {
-      depth -= 1;
-      if (depth === 0) {
-        return scriptText.slice(start, index + 1);
-      }
-    }
-  }
-
-  return null;
-}
-
-function saoPauloLocalToUtc(localDateTime: string) {
-  return new Date(`${localDateTime}:00-03:00`).toISOString();
-}
-
-function cleanWikiText(value: string) {
-  return value
-    .replace(/<!--[\s\S]*?-->/g, "")
-    .replace(/&nbsp;/g, " ")
-    .replace(/\{\{nowrap\|([^{}]+)\}\}/g, "$1")
-    .replace(/\[\[[^\]|]+\|([^\]]+)\]\]/g, "$1")
-    .replace(/\[\[([^\]]+)\]\]/g, "$1")
-    .replace(/\{\{!}}/g, "|")
-    .replace(/<[^>]+>/g, "")
-    .replace(/''+/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 function teamFromCode(code: string): Team {
   const normalized = teamAliases[identityPart(code)] ?? code.toUpperCase();
   const catalogEntry = teamCatalog[normalized] ?? {
@@ -421,7 +278,7 @@ function teamFromCode(code: string): Team {
 }
 
 function placeholderTeam(label: string): Team {
-  const cleanLabel = cleanWikiText(label);
+  const cleanLabel = label.trim() || "TBD";
   const abbreviation = cleanLabel
     .replace(/^Winner Group /i, "1")
     .replace(/^Runner-up Group /i, "2")
@@ -438,180 +295,6 @@ function placeholderTeam(label: string): Team {
     shortName: cleanLabel,
     abbreviation: abbreviation || "TBD",
     flagUrl: flagUrl("un"),
-  };
-}
-
-function parseWikiTeam(value: string): Team {
-  const flagMatch = value.match(/\{\{#invoke:flag\|fb(?:-rt)?\|([A-Z0-9]+)\}\}/i);
-  if (flagMatch) {
-    return teamFromCode(flagMatch[1]);
-  }
-
-  return placeholderTeam(value);
-}
-
-function parseWikiFields(block: string) {
-  const fields: Record<string, string> = {};
-  for (const line of block.split("\n")) {
-    const match = line.match(/^\|([a-z0-9_]+)\s*=\s*(.*)$/i);
-    if (match) {
-      fields[match[1].toLowerCase()] = match[2].trim();
-    }
-  }
-
-  return fields;
-}
-
-function parseWikiMatchNumber(scoreField: string, fallback: string) {
-  const match = scoreField.match(/Match\s+(\d+)/i);
-  if (match) {
-    return Number(match[1]);
-  }
-
-  const fallbackMatch = fallback.match(/(\d+)/);
-  return fallbackMatch ? Number(fallbackMatch[1]) : null;
-}
-
-function parseWikiDate(dateField: string) {
-  const match = dateField.match(/Start date\|(\d{4})\|(\d{1,2})\|(\d{1,2})/i);
-  if (!match) {
-    return null;
-  }
-
-  return {
-    year: Number(match[1]),
-    month: Number(match[2]),
-    day: Number(match[3]),
-  };
-}
-
-function parseWikiKickoff(dateField: string, timeField: string) {
-  const date = parseWikiDate(dateField);
-  const timeMatch = timeField
-    .replace(/&nbsp;/g, " ")
-    .match(/(\d{1,2})(?::(\d{2}))?\s*(a\.m\.|p\.m\.)?.*?UTC[−-](\d{1,2})(?::?(\d{2}))?/i);
-
-  if (!date || !timeMatch) {
-    return null;
-  }
-
-  let hour = Number(timeMatch[1]);
-  const minute = Number(timeMatch[2] ?? 0);
-  const ampm = timeMatch[3]?.toLowerCase();
-  const offsetHours = Number(timeMatch[4]);
-  const offsetMinutes = Number(timeMatch[5] ?? 0);
-
-  if (ampm === "p.m." && hour !== 12) {
-    hour += 12;
-  }
-  if (ampm === "a.m." && hour === 12) {
-    hour = 0;
-  }
-
-  const utcMillis = Date.UTC(date.year, date.month - 1, date.day, hour + offsetHours, minute + offsetMinutes);
-  return new Date(utcMillis).toISOString();
-}
-
-function parseStageFromWikiPage(page: string, section: string): { stage: Stage; groupName?: string } {
-  const groupMatch = page.match(/Group_([A-L])$/);
-  if (groupMatch) {
-    return { stage: "GROUP_STAGE", groupName: `Group ${groupMatch[1]}` };
-  }
-
-  const stageEntry = stageBySectionPrefix.find(([pattern]) => pattern.test(section));
-  return { stage: stageEntry?.[1] ?? "FINAL" };
-}
-
-function parseWinnerFromFootballData(value: string | null): WinnerPick | undefined {
-  if (value === "HOME_TEAM") {
-    return "home";
-  }
-  if (value === "AWAY_TEAM") {
-    return "away";
-  }
-  if (value === "DRAW") {
-    return "draw";
-  }
-
-  return undefined;
-}
-
-function normalizeStatus(value: string): MatchStatus {
-  if (value === "IN_PLAY") {
-    return "IN_PLAY";
-  }
-  if (value === "PAUSED") {
-    return "PAUSED";
-  }
-  if (value === "FINISHED") {
-    return "FINISHED";
-  }
-  if (value === "POSTPONED" || value === "SUSPENDED" || value === "CANCELLED") {
-    return value;
-  }
-  if (value === "LIVE") {
-    return "LIVE";
-  }
-
-  return "SCHEDULED";
-}
-
-function normalizeFootballDataStage(value: string): Stage {
-  const normalized = value.toUpperCase();
-  if (normalized.includes("LAST_32") || normalized.includes("ROUND_OF_32")) {
-    return "ROUND_OF_32";
-  }
-  if (normalized.includes("LAST_16") || normalized.includes("ROUND_OF_16")) {
-    return "ROUND_OF_16";
-  }
-  if (normalized.includes("QUARTER")) {
-    return "QUARTER_FINALS";
-  }
-  if (normalized.includes("SEMI")) {
-    return "SEMI_FINALS";
-  }
-  if (normalized.includes("THIRD")) {
-    return "THIRD_PLACE";
-  }
-  if (normalized.includes("FINAL")) {
-    return "FINAL";
-  }
-
-  return "GROUP_STAGE";
-}
-
-function teamFromFootballData(team: {
-  id: number | null;
-  name: string | null;
-  shortName: string | null;
-  tla: string | null;
-  crest: string | null;
-}): Team {
-  const abbreviation = teamAliases[identityPart(team.tla ?? "")] ?? team.tla?.trim().toUpperCase() ?? "TBD";
-  const known = teamCatalog[abbreviation];
-  const name = team.name?.trim() || known?.name || abbreviation;
-
-  return {
-    id: team.id ? `fd-${team.id}` : slugify(name || abbreviation),
-    name,
-    shortName: team.shortName?.trim() || known?.shortName || name,
-    abbreviation,
-    flagUrl: team.crest || (known ? flagUrl(known.flagCode) : flagUrl("un")),
-  };
-}
-
-function teamFromGlobo(team: GloboTeam | undefined): Team {
-  const rawCode = team?.sigla ?? "TBD";
-  const abbreviation = teamAliases[identityPart(rawCode)] ?? rawCode.toUpperCase();
-  const known = teamCatalog[abbreviation];
-  const name = team?.nome_popular?.trim() || known?.name || abbreviation;
-
-  return {
-    id: team?.id ? `globo-${team.id}` : slugify(name || abbreviation),
-    name: known?.name ?? name,
-    shortName: known?.shortName ?? name,
-    abbreviation,
-    flagUrl: team?.escudo ?? (known ? flagUrl(known.flagCode) : flagUrl("un")),
   };
 }
 
@@ -792,7 +475,6 @@ async function fetchEspnObservedMatches(
       awayScore: Number.isInteger(awayScore) ? awayScore : undefined,
       winner: winnerFromScores(homeScore, awayScore),
       source: "espn-scoreboard",
-      sourcePriority: sourcePriority["espn-scoreboard"],
       raw: event as unknown as Record<string, unknown>,
     });
   }
@@ -809,467 +491,38 @@ async function fetchEspnObservedMatches(
   };
 }
 
-async function fetchText(url: string) {
-  const response = await fetchWithRetry(url);
-  if (!response.ok) {
-    throw new Error(`${url} returned ${response.status}`);
+function espnDateWindowAround(date: Date) {
+  const from = new Date(date);
+  from.setUTCDate(from.getUTCDate() - 1);
+  const to = new Date(date);
+  to.setUTCDate(to.getUTCDate() + 1);
+
+  return `${compactUtcDate(from)}-${compactUtcDate(to)}`;
+}
+
+function isSameMatch(left: Match, right: Match) {
+  if (left.providerMatchId && right.providerMatchId && left.providerMatchId === right.providerMatchId) {
+    return true;
   }
 
-  return response.text();
+  return (
+    left.stage === right.stage &&
+    canonicalTeamCode(left.homeTeam) === canonicalTeamCode(right.homeTeam) &&
+    canonicalTeamCode(left.awayTeam) === canonicalTeamCode(right.awayTeam)
+  );
 }
 
-async function fetchWikipediaPageWikitext(page: string) {
-  const url = new URL("https://en.wikipedia.org/w/api.php");
-  url.searchParams.set("action", "parse");
-  url.searchParams.set("page", page);
-  url.searchParams.set("prop", "wikitext");
-  url.searchParams.set("format", "json");
-  url.searchParams.set("formatversion", "2");
+export async function fetchEspnMatchForMatch(match: Match): Promise<Match | null> {
+  const espn = await fetchEspnObservedMatches(espnDateWindowAround(new Date(match.kickoffAt)));
+  const candidate = espn.matches.find((entry) => isSameMatch(match, entry));
 
-  const payload = (await fetchJson(url.toString())) as { parse?: { wikitext?: string } };
-  return payload.parse?.wikitext ?? "";
-}
-
-async function fetchWikipediaMatches(): Promise<{ observation: RawObservation; matches: ObservedMatch[] }> {
-  const matches: ObservedMatch[] = [];
-  const rawPages: Record<string, string> = {};
-  const pageErrors: string[] = [];
-
-  for (const page of wikipediaFixturePages) {
-    let wikitext = "";
-    try {
-      wikitext = await fetchWikipediaPageWikitext(page);
-    } catch (error) {
-      pageErrors.push(`${page}: ${error instanceof Error ? error.message : "Unknown error"}`);
-      continue;
-    }
-    rawPages[page] = wikitext;
-
-    const sectionRegex =
-      /<section begin=([^ />]+)\s*\/>\s*\{\{#invoke:football box\|main([\s\S]*?)\}\}\s*<section end=\1/gi;
-    let sectionMatch: RegExpExecArray | null;
-    while ((sectionMatch = sectionRegex.exec(wikitext))) {
-      const section = sectionMatch[1];
-      const fields = parseWikiFields(sectionMatch[2]);
-      const number = parseWikiMatchNumber(fields.score ?? "", section);
-      const kickoffAt = parseWikiKickoff(fields.date ?? "", fields.time ?? "");
-      if (!number || !kickoffAt || !fields.team1 || !fields.team2) {
-        continue;
+  return candidate
+    ? {
+        ...candidate,
+        id: match.id,
+        groupName: match.groupName ?? candidate.groupName,
       }
-
-      const stageInfo = parseStageFromWikiPage(page, section);
-      const homeTeam = parseWikiTeam(fields.team1);
-      const awayTeam = parseWikiTeam(fields.team2);
-      matches.push({
-        id: buildMatchKey(homeTeam, awayTeam, stageInfo.stage, String(number)),
-        providerMatchId: String(number),
-        stage: stageInfo.stage,
-        groupName: stageInfo.groupName,
-        kickoffAt,
-        lockAt: getLockAt(kickoffAt),
-        venue: cleanWikiText(fields.stadium ?? ""),
-        homeTeam,
-        awayTeam,
-        status: "SCHEDULED",
-        source: "wikipedia-fifa-fixtures",
-        sourcePriority: sourcePriority["wikipedia-fifa-fixtures"],
-        raw: { page, section, fields },
-      });
-    }
-  }
-
-  return {
-    observation: {
-      source: "wikipedia-fifa-fixtures",
-      scope: "full-schedule",
-      status: pageErrors.length > 0 ? "error" : "ready",
-      message: pageErrors.length > 0 ? pageErrors.join(" | ").slice(0, 1000) : undefined,
-      payload: rawPages,
-      normalizedMatches: matches.length,
-    },
-    matches,
-  };
-}
-
-async function fetchFootballDataObservedMatches(params: {
-  dateFrom?: string;
-  dateTo?: string;
-  status?: string;
-} = {}): Promise<{ observation: RawObservation; matches: ObservedMatch[] }> {
-  const result = await fetchFootballDataMatches(params);
-  if (result.status !== "ready") {
-    return {
-      observation: {
-        source: "football-data",
-        scope: "full-schedule",
-        status: result.status,
-        message: "reason" in result ? result.reason : undefined,
-        payload: result,
-        normalizedMatches: 0,
-      },
-      matches: [],
-    };
-  }
-
-  const matches = result.matches.map((match) => {
-    const score = match.score.fullTime;
-    const homeTeam = teamFromFootballData(match.homeTeam);
-    const awayTeam = teamFromFootballData(match.awayTeam);
-    return {
-      id: buildMatchKey(homeTeam, awayTeam, normalizeFootballDataStage(match.stage), String(match.id)),
-      providerMatchId: String(match.id),
-      stage: normalizeFootballDataStage(match.stage),
-      groupName: match.group ?? undefined,
-      kickoffAt: match.utcDate,
-      lockAt: getLockAt(match.utcDate),
-      venue: "",
-      homeTeam,
-      awayTeam,
-      status: normalizeStatus(match.status),
-      homeScore: score.home ?? undefined,
-      awayScore: score.away ?? undefined,
-      winner: parseWinnerFromFootballData(match.score.winner),
-      source: "football-data" as const,
-      sourcePriority: sourcePriority["football-data"],
-      raw: match as unknown as Record<string, unknown>,
-    };
-  });
-
-  return {
-    observation: {
-      source: "football-data",
-      scope: "full-schedule",
-      status: "ready",
-      payload: result,
-      normalizedMatches: matches.length,
-    },
-    matches,
-  };
-}
-
-async function fetchRawObservation(source: SourceName, url: string): Promise<RawObservation> {
-  try {
-    const text = await fetchText(url);
-    return {
-      source,
-      scope: "reference-page",
-      status: "ready",
-      payload: {
-        url,
-        sample: text.slice(0, 250_000),
-      },
-      normalizedMatches: 0,
-    };
-  } catch (error) {
-    return {
-      source,
-      scope: "reference-page",
-      status: "error",
-      message: error instanceof Error ? error.message : "Unknown fetch error",
-      normalizedMatches: 0,
-    };
-  }
-}
-
-async function fetchGloboMatches(): Promise<{ observation: RawObservation; matches: ObservedMatch[] }> {
-  const url = "https://ge.globo.com/futebol/copa-do-mundo/";
-  const html = await fetchText(url);
-  const groupsJson = extractJsAssignmentArray(html, "grupos_fase");
-  if (!groupsJson) {
-    return {
-      observation: {
-        source: "ge-globo",
-        scope: "groups-fixtures",
-        status: "error",
-        message: "Could not find grupos_fase in GE HTML",
-        payload: { url, sample: html.slice(0, 250_000) },
-        normalizedMatches: 0,
-      },
-      matches: [],
-    };
-  }
-
-  const groups = JSON.parse(groupsJson) as GloboGroup[];
-  const matches: ObservedMatch[] = [];
-  for (const group of groups) {
-    for (const globoMatch of group.lista_jogos ?? []) {
-      if (!globoMatch.data_realizacao) {
-        continue;
-      }
-
-      const kickoffAt = saoPauloLocalToUtc(globoMatch.data_realizacao);
-      const homeTeam = teamFromGlobo(globoMatch.equipes?.mandante);
-      const awayTeam = teamFromGlobo(globoMatch.equipes?.visitante);
-      const winner = winnerFromScores(
-        globoMatch.placar_oficial_mandante,
-        globoMatch.placar_oficial_visitante,
-      );
-
-      matches.push({
-        id: buildMatchKey(homeTeam, awayTeam, "GROUP_STAGE", globoMatch.id ? String(globoMatch.id) : undefined),
-        providerMatchId: globoMatch.id ? String(globoMatch.id) : undefined,
-        stage: "GROUP_STAGE",
-        groupName: group.nome_grupo?.replace("Grupo", "Group"),
-        kickoffAt,
-        lockAt: getLockAt(kickoffAt),
-        venue: globoMatch.sede?.nome_popular ?? "",
-        homeTeam,
-        awayTeam,
-        status: winner ? "FINISHED" : globoMatch.jogo_ja_comecou ? "IN_PLAY" : "SCHEDULED",
-        homeScore: globoMatch.placar_oficial_mandante ?? undefined,
-        awayScore: globoMatch.placar_oficial_visitante ?? undefined,
-        winner,
-        source: "ge-globo",
-        sourcePriority: sourcePriority["ge-globo"],
-        raw: {
-          timezoneAssumption: "America/Sao_Paulo (-03:00)",
-          match: globoMatch as unknown as Record<string, unknown>,
-        },
-      });
-    }
-  }
-
-  return {
-    observation: {
-      source: "ge-globo",
-      scope: "groups-fixtures",
-      status: "ready",
-      payload: { url, groups },
-      normalizedMatches: matches.length,
-    },
-    matches,
-  };
-}
-
-function getMockObservedMatches(): ObservedMatch[] {
-  return mockMatches.map((match) => ({
-    ...match,
-    id: buildMatchKey(match.homeTeam, match.awayTeam, match.stage, match.providerMatchId ?? match.id),
-    source: "mock-backup",
-    sourcePriority: sourcePriority["mock-backup"],
-    raw: { fallback: true },
-  }));
-}
-
-function selectedMatch(observations: ObservedMatch[]) {
-  return [...observations].sort((a, b) => b.sourcePriority - a.sourcePriority)[0];
-}
-
-function collectField(observations: ObservedMatch[], getValue: (match: ObservedMatch) => string | undefined) {
-  const values: Record<string, string[]> = {};
-  for (const observation of observations) {
-    const value = getValue(observation);
-    if (!value) {
-      continue;
-    }
-    values[value] = [...(values[value] ?? []), observation.source];
-  }
-
-  return values;
-}
-
-function guessField(
-  selected: ObservedMatch,
-  observations: ObservedMatch[],
-  getValue: (match: ObservedMatch) => string | undefined,
-): FieldGuess | null {
-  const values = collectField(observations, getValue);
-  const keys = Object.keys(values);
-  if (keys.length <= 1) {
-    return null;
-  }
-
-  const selectedValue = getValue(selected);
-  if (!selectedValue) {
-    return null;
-  }
-
-  const weighted = keys.map((value) => ({
-    value,
-    weight: observations
-      .filter((observation) => getValue(observation) === value)
-      .reduce((sum, observation) => sum + observation.sourcePriority, 0),
-  }));
-  const selectedWeight = weighted.find((entry) => entry.value === selectedValue)?.weight ?? 0;
-  const totalWeight = weighted.reduce((sum, entry) => sum + entry.weight, 0);
-
-  return {
-    selected: selectedValue,
-    values,
-    confidence: totalWeight > 0 ? selectedWeight / totalWeight : 0,
-    selectedWeight,
-    competingWeight: weighted
-      .filter((entry) => entry.value !== selectedValue)
-      .reduce((maxWeight, entry) => Math.max(maxWeight, entry.weight), 0),
-  };
-}
-
-function bestWeightedValue(
-  selected: ObservedMatch,
-  observations: ObservedMatch[],
-  getValue: (match: ObservedMatch) => string | undefined,
-) {
-  const selectedValue = getValue(selected);
-  if (!selectedValue) {
-    return null;
-  }
-
-  const weighted = Object.entries(collectField(observations, getValue))
-    .map(([value, sources]) => ({
-      value,
-      weight: sources.reduce((sum, source) => sum + sourcePriority[source as SourceName], 0),
-    }))
-    .sort((a, b) => b.weight - a.weight);
-  const best = weighted[0];
-  const selectedWeight = weighted.find((entry) => entry.value === selectedValue)?.weight ?? 0;
-
-  if (!best || best.value === selectedValue || best.weight <= selectedWeight) {
-    return null;
-  }
-
-  return best.value;
-}
-
-function applyScheduleConsensus(selected: ObservedMatch, observations: ObservedMatch[]): ObservedMatch {
-  const kickoffAt = bestWeightedValue(selected, observations, (match) => match.kickoffAt);
-  if (!kickoffAt) {
-    return selected;
-  }
-
-  return {
-    ...selected,
-    kickoffAt,
-    lockAt: getLockAt(kickoffAt),
-  };
-}
-
-function shouldReportConflict(fieldName: string, guess: FieldGuess) {
-  if (guess.selectedWeight > guess.competingWeight) {
-    return false;
-  }
-
-  if (fieldName === "venue") {
-    return guess.confidence < 0.5;
-  }
-
-  return guess.confidence < 0.66;
-}
-
-function consolidateMatches(observedMatches: ObservedMatch[], requiredSource?: SourceName) {
-  const grouped = new Map<string, ObservedMatch[]>();
-  for (const match of observedMatches) {
-    const groupingKey = [
-      match.stage,
-      identityPart(match.homeTeam.name || match.homeTeam.abbreviation),
-      identityPart(match.awayTeam.name || match.awayTeam.abbreviation),
-    ].join(":");
-    grouped.set(groupingKey, [...(grouped.get(groupingKey) ?? []), match]);
-  }
-
-  const consolidated: ObservedMatch[] = [];
-  const conflicts: Array<{
-    matchId: string;
-    fieldName: string;
-    selectedValue: string;
-    observedValues: Record<string, string[]>;
-  }> = [];
-
-  for (const observations of grouped.values()) {
-    if (requiredSource && !observations.some((observation) => observation.source === requiredSource)) {
-      continue;
-    }
-
-    const selected = applyScheduleConsensus(selectedMatch(observations), observations);
-    consolidated.push(selected);
-
-    const fieldChecks: Array<[string, (match: ObservedMatch) => string | undefined]> = [
-      ["kickoff_at", (match) => match.kickoffAt],
-      ["home_team", (match) => canonicalTeamCode(match.homeTeam)],
-      ["away_team", (match) => canonicalTeamCode(match.awayTeam)],
-      ["venue", (match) => match.venue],
-      ["status", (match) => match.status],
-      ["score", (match) =>
-        Number.isInteger(match.homeScore) && Number.isInteger(match.awayScore)
-          ? `${match.homeScore}-${match.awayScore}`
-          : undefined],
-    ];
-
-    for (const [fieldName, getter] of fieldChecks) {
-      const guess = guessField(selected, observations, getter);
-      if (guess && shouldReportConflict(fieldName, guess)) {
-        conflicts.push({
-          matchId: selected.id,
-          fieldName,
-          selectedValue: guess.selected,
-          observedValues: guess.values,
-        });
-      }
-    }
-  }
-
-  return {
-    consolidated: consolidated.sort((a, b) => a.kickoffAt.localeCompare(b.kickoffAt)),
-    conflicts,
-  };
-}
-
-function observationGroupKey(match: ObservedMatch) {
-  return [
-    match.stage,
-    canonicalTeamCode(match.homeTeam),
-    canonicalTeamCode(match.awayTeam),
-  ].join(":");
-}
-
-function consolidateFromPrimary(primaryMatches: ObservedMatch[], comparisonMatches: ObservedMatch[]) {
-  const grouped = new Map<string, ObservedMatch[]>();
-  for (const match of comparisonMatches) {
-    const groupingKey = observationGroupKey(match);
-    grouped.set(groupingKey, [...(grouped.get(groupingKey) ?? []), match]);
-  }
-
-  const conflicts: Array<{
-    matchId: string;
-    fieldName: string;
-    selectedValue: string;
-    observedValues: Record<string, string[]>;
-  }> = [];
-
-  const consolidated: ObservedMatch[] = [];
-
-  for (const primaryMatch of primaryMatches) {
-    const observations = grouped.get(observationGroupKey(primaryMatch)) ?? [primaryMatch];
-    const selected = applyScheduleConsensus(primaryMatch, observations);
-    consolidated.push(selected);
-    const fieldChecks: Array<[string, (match: ObservedMatch) => string | undefined]> = [
-      ["kickoff_at", (match) => match.kickoffAt],
-      ["home_team", (match) => canonicalTeamCode(match.homeTeam)],
-      ["away_team", (match) => canonicalTeamCode(match.awayTeam)],
-      ["venue", (match) => match.venue],
-      ["status", (match) => match.status],
-      ["score", (match) =>
-        Number.isInteger(match.homeScore) && Number.isInteger(match.awayScore)
-          ? `${match.homeScore}-${match.awayScore}`
-          : undefined],
-    ];
-
-    for (const [fieldName, getter] of fieldChecks) {
-      const guess = guessField(selected, observations, getter);
-      if (guess && shouldReportConflict(fieldName, guess)) {
-        conflicts.push({
-          matchId: selected.id,
-          fieldName,
-          selectedValue: guess.selected,
-          observedValues: guess.values,
-        });
-      }
-    }
-  }
-
-  return {
-    consolidated: consolidated.sort((a, b) => a.kickoffAt.localeCompare(b.kickoffAt)),
-    conflicts,
-  };
+    : null;
 }
 
 export async function ensureMatchSyncSchema(sql: Sql) {
@@ -1683,7 +936,7 @@ export async function syncWorldCupMatches() {
   }
 
   const observedMatches = espn.matches;
-  const { consolidated, conflicts } = consolidateFromPrimary(espn.matches, observedMatches);
+  const consolidated = [...espn.matches].sort((a, b) => a.kickoffAt.localeCompare(b.kickoffAt));
 
   for (const observation of rawObservations) {
     await saveRawObservation(sql, observation);
@@ -1720,7 +973,7 @@ export async function syncWorldCupMatches() {
     consolidatedMatches: consolidated.length,
     normalizedObservations: observedMatches.length,
     conflicts: 0,
-    autoResolvedDisagreements: conflicts.length,
+    autoResolvedDisagreements: 0,
     sources: rawObservations.map((observation) => ({
       source: observation.source,
       status: observation.status,

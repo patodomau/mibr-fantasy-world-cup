@@ -3,22 +3,19 @@ import "server-only";
 import { neon } from "@neondatabase/serverless";
 import { mockLeaderboard, mockMatches } from "@/data/mock-world-cup";
 import { optionalEnv } from "@/lib/env";
-import { fetchFootballDataMatches } from "@/lib/football-data";
+import { fetchEspnMatchForMatch } from "@/lib/match-sync";
 import {
   buildMatchKey,
-  getLockAt,
   isMatchPickable,
   isMatchLocked,
   validatePrediction,
   type AdminUser,
   type LeaderboardEntry,
   type Match,
-  type MatchStatus,
   type MatchSyncOverview,
   type MatchSyncSourceStatus,
   type PredictionDraft,
   type PredictionResult,
-  type WinnerPick,
 } from "@/lib/fantasy-types";
 
 type LeaderboardRow = {
@@ -92,15 +89,6 @@ type SyncSourceRow = {
   observed_at: string;
 };
 
-type FootballDataReadyResult = Extract<
-  Awaited<ReturnType<typeof fetchFootballDataMatches>>,
-  { status: "ready" }
->;
-
-type FootballDataMatch = FootballDataReadyResult["matches"][number];
-
-const liveStatusValues = new Set<MatchStatus>(["LIVE", "IN_PLAY", "PAUSED", "FINISHED"]);
-
 function canonicalizeMatch(match: Match): Match {
   return {
     ...match,
@@ -120,82 +108,11 @@ function signatureForMatch(match: Match) {
   return matchSignature(match.stage, match.groupName ?? null, match.homeTeam.id, match.awayTeam.id);
 }
 
-function identityPart(value: string | null | undefined) {
-  return (value ?? "")
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, "");
-}
-
-function normalizeFootballDataStatus(value: string): MatchStatus {
-  if (value === "LIVE" || value === "IN_PLAY" || value === "PAUSED" || value === "FINISHED") {
-    return value;
-  }
-  if (value === "POSTPONED" || value === "SUSPENDED" || value === "CANCELLED") {
-    return value;
-  }
-
-  return "SCHEDULED";
-}
-
-function parseFootballDataWinner(value: FootballDataMatch["score"]["winner"]): WinnerPick | undefined {
-  if (value === "HOME_TEAM") {
-    return "home";
-  }
-  if (value === "AWAY_TEAM") {
-    return "away";
-  }
-  if (value === "DRAW") {
-    return "draw";
-  }
-
-  return undefined;
-}
-
-function getUtcDateWindow(date: Date, daysOffset: number) {
-  const copy = new Date(date);
-  copy.setUTCDate(copy.getUTCDate() + daysOffset);
-  return copy.toISOString().slice(0, 10);
-}
-
 function shouldRefreshMatchBeforePick(match: Match, now = new Date()) {
   const kickoff = new Date(match.kickoffAt);
   const startsAt = kickoff.getTime() - 24 * 60 * 60 * 1000;
   const endsAt = kickoff.getTime() + 6 * 60 * 60 * 1000;
   return now.getTime() >= startsAt && now.getTime() <= endsAt;
-}
-
-function footballDataMatchMatches(match: Match, candidate: FootballDataMatch) {
-  if (match.providerMatchId && String(candidate.id) === match.providerMatchId) {
-    return true;
-  }
-
-  const homeCodes = [
-    identityPart(match.homeTeam.abbreviation),
-    identityPart(match.homeTeam.shortName),
-    identityPart(match.homeTeam.name),
-  ];
-  const awayCodes = [
-    identityPart(match.awayTeam.abbreviation),
-    identityPart(match.awayTeam.shortName),
-    identityPart(match.awayTeam.name),
-  ];
-  const candidateHome = [
-    identityPart(candidate.homeTeam.tla),
-    identityPart(candidate.homeTeam.shortName),
-    identityPart(candidate.homeTeam.name),
-  ];
-  const candidateAway = [
-    identityPart(candidate.awayTeam.tla),
-    identityPart(candidate.awayTeam.shortName),
-    identityPart(candidate.awayTeam.name),
-  ];
-
-  return (
-    homeCodes.some((code) => code && candidateHome.includes(code)) &&
-    awayCodes.some((code) => code && candidateAway.includes(code))
-  );
 }
 
 function mapMatchRow(row: MatchRow): Match {
@@ -349,59 +266,50 @@ async function refreshMatchStatusBeforePick(sql: ReturnType<typeof neon<false, f
     return match;
   }
 
-  const kickoff = new Date(match.kickoffAt);
-  const result = await fetchFootballDataMatches({
-    dateFrom: getUtcDateWindow(kickoff, -1),
-    dateTo: getUtcDateWindow(kickoff, 1),
-  });
-
-  if (result.status !== "ready") {
+  let candidate: Match | null = null;
+  try {
+    candidate = await fetchEspnMatchForMatch(match);
+  } catch {
     throw new Error("Could not verify live match status. Try again in a minute.");
   }
 
-  const candidate = result.matches.find((entry) => footballDataMatchMatches(match, entry));
   if (!candidate) {
     return match;
   }
 
-  const status = normalizeFootballDataStatus(candidate.status);
-  const nextLockAt = getLockAt(candidate.utcDate);
-  const homeScore = candidate.score.fullTime.home ?? undefined;
-  const awayScore = candidate.score.fullTime.away ?? undefined;
-  const winner = parseFootballDataWinner(candidate.score.winner);
-
   await sql`
     update mibr_fantasy_world_cup.matches
-    set provider_match_id = coalesce(provider_match_id, ${String(candidate.id)}),
-        kickoff_at = ${candidate.utcDate},
-        lock_at = least(lock_at, ${nextLockAt}),
+    set provider_match_id = coalesce(provider_match_id, ${candidate.providerMatchId ?? null}),
+        kickoff_at = ${candidate.kickoffAt},
+        lock_at = least(lock_at, ${candidate.lockAt}),
         status = case
-          when ${status} = 'SCHEDULED'
+          when ${candidate.status} = 'SCHEDULED'
            and status in ('LIVE', 'IN_PLAY', 'PAUSED', 'FINISHED') then status
-          else ${status}
+          else ${candidate.status}
         end,
-        home_score = ${homeScore ?? null},
-        away_score = ${awayScore ?? null},
-        winner = ${winner ?? null},
+        home_score = ${candidate.homeScore ?? null},
+        away_score = ${candidate.awayScore ?? null},
+        winner = ${candidate.winner ?? null},
         synced_at = now(),
         updated_at = now()
     where id = ${match.id}
   `;
 
-  const preservedLiveStatus = liveStatusValues.has(match.status) && status === "SCHEDULED";
-  const effectiveStatus = preservedLiveStatus ? match.status : status;
+  const preservedLiveStatus =
+    ["LIVE", "IN_PLAY", "PAUSED", "FINISHED"].includes(match.status) && candidate.status === "SCHEDULED";
+  const effectiveStatus = preservedLiveStatus ? match.status : candidate.status;
   const effectiveLockAt =
-    new Date(match.lockAt).getTime() <= new Date(nextLockAt).getTime() ? match.lockAt : nextLockAt;
+    new Date(match.lockAt).getTime() <= new Date(candidate.lockAt).getTime() ? match.lockAt : candidate.lockAt;
 
   return {
     ...match,
-    providerMatchId: match.providerMatchId ?? String(candidate.id),
-    kickoffAt: candidate.utcDate,
+    providerMatchId: match.providerMatchId ?? candidate.providerMatchId,
+    kickoffAt: candidate.kickoffAt,
     lockAt: effectiveLockAt,
     status: effectiveStatus,
-    homeScore,
-    awayScore,
-    winner,
+    homeScore: candidate.homeScore,
+    awayScore: candidate.awayScore,
+    winner: candidate.winner,
   };
 }
 
