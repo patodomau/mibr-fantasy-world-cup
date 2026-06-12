@@ -101,11 +101,20 @@ function matchSignature(stage: string | null, groupName: string | null, homeTeam
     return null;
   }
 
-  return [stage, groupName ?? "", homeTeamId, awayTeamId].join(":");
+  return [stage, normalizeGroupName(groupName) ?? "", homeTeamId, awayTeamId].join(":");
 }
 
 function signatureForMatch(match: Match) {
   return matchSignature(match.stage, match.groupName ?? null, match.homeTeam.id, match.awayTeam.id);
+}
+
+function normalizeGroupName(value: string | null | undefined) {
+  const normalized = value?.trim().match(/^GROUP[_\s-]?([A-L])$/i);
+  if (normalized) {
+    return `Group ${normalized[1].toUpperCase()}`;
+  }
+
+  return value?.trim() || undefined;
 }
 
 function shouldRefreshMatchBeforePick(match: Match, now = new Date()) {
@@ -120,7 +129,7 @@ function mapMatchRow(row: MatchRow): Match {
     id: row.id,
     providerMatchId: row.provider_match_id ?? undefined,
     stage: row.stage,
-    groupName: row.group_name ?? undefined,
+    groupName: normalizeGroupName(row.group_name),
     kickoffAt: new Date(row.kickoff_at).toISOString(),
     lockAt: new Date(row.lock_at).toISOString(),
     venue: row.venue ?? "",
@@ -228,7 +237,7 @@ async function ensureMatchSeeded(sql: ReturnType<typeof neon<false, false>>, mat
       ${match.id},
       ${match.providerMatchId ?? null},
       ${match.stage},
-      ${match.groupName ?? null},
+      ${normalizeGroupName(match.groupName) ?? null},
       ${match.kickoffAt},
       ${match.lockAt},
       ${match.venue},
@@ -338,7 +347,10 @@ async function findExistingPredictionMatchId(
     join mibr_fantasy_world_cup.matches m on m.id = p.match_id
     where p.discord_user_id = ${discordUserId}
       and m.stage = ${match.stage}
-      and m.group_name is not distinct from ${match.groupName ?? null}
+      and case
+        when m.group_name ~* '^GROUP[_ -]?[A-L]$' then 'Group ' || upper(right(m.group_name, 1))
+        else m.group_name
+      end is not distinct from ${normalizeGroupName(match.groupName) ?? null}
       and m.home_team_id = ${match.homeTeam.id}
       and m.away_team_id = ${match.awayTeam.id}
     order by (p.match_id = ${match.id}) desc, p.updated_at desc

@@ -261,6 +261,15 @@ function stableHash(payload: unknown) {
   return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
 }
 
+function normalizeGroupName(value: string | null | undefined) {
+  const normalized = value?.trim().match(/^GROUP[_\s-]?([A-L])$/i);
+  if (normalized) {
+    return `Group ${normalized[1].toUpperCase()}`;
+  }
+
+  return value?.trim() || undefined;
+}
+
 function teamFromCode(code: string): Team {
   const normalized = teamAliases[identityPart(code)] ?? code.toUpperCase();
   const catalogEntry = teamCatalog[normalized] ?? {
@@ -520,7 +529,7 @@ export async function fetchEspnMatchForMatch(match: Match): Promise<Match | null
     ? {
         ...candidate,
         id: match.id,
-        groupName: match.groupName ?? candidate.groupName,
+        groupName: normalizeGroupName(match.groupName ?? candidate.groupName),
       }
     : null;
 }
@@ -642,7 +651,7 @@ async function saveMatchObservation(sql: Sql, match: ObservedMatch) {
       ${match.id},
       ${match.providerMatchId ?? null},
       ${match.stage},
-      ${match.groupName ?? null},
+      ${normalizeGroupName(match.groupName) ?? null},
       ${match.kickoffAt},
       ${match.lockAt},
       ${match.venue},
@@ -714,7 +723,10 @@ async function resolveExistingConsolidatedMatchId(sql: Sql, match: ObservedMatch
     where m.id = ${match.id}
        or (
         m.stage = ${match.stage}
-        and m.group_name is not distinct from ${match.groupName ?? null}
+        and case
+          when m.group_name ~* '^GROUP[_ -]?[A-L]$' then 'Group ' || upper(right(m.group_name, 1))
+          else m.group_name
+        end is not distinct from ${normalizeGroupName(match.groupName) ?? null}
         and m.home_team_id = ${match.homeTeam.id}
         and m.away_team_id = ${match.awayTeam.id}
       )
@@ -740,6 +752,7 @@ async function resolveUniqueKickoffMatchId(sql: Sql, match: ObservedMatch) {
 async function saveConsolidatedMatch(sql: Sql, match: ObservedMatch) {
   await saveTeam(sql, match.homeTeam);
   await saveTeam(sql, match.awayTeam);
+  const groupName = normalizeGroupName(match.groupName);
 
   await sql`
     insert into mibr_fantasy_world_cup.matches (
@@ -763,7 +776,7 @@ async function saveConsolidatedMatch(sql: Sql, match: ObservedMatch) {
       ${match.id},
       ${match.providerMatchId ?? null},
       ${match.stage},
-      ${match.groupName ?? null},
+      ${groupName ?? null},
       ${match.kickoffAt},
       ${match.lockAt},
       ${match.venue},
@@ -779,7 +792,14 @@ async function saveConsolidatedMatch(sql: Sql, match: ObservedMatch) {
     on conflict (id) do update
     set provider_match_id = excluded.provider_match_id,
         stage = excluded.stage,
-        group_name = coalesce(excluded.group_name, mibr_fantasy_world_cup.matches.group_name),
+        group_name = coalesce(
+          excluded.group_name,
+          case
+            when mibr_fantasy_world_cup.matches.group_name ~* '^GROUP[_ -]?[A-L]$'
+              then 'Group ' || upper(right(mibr_fantasy_world_cup.matches.group_name, 1))
+            else mibr_fantasy_world_cup.matches.group_name
+          end
+        ),
         kickoff_at = excluded.kickoff_at,
         lock_at = least(mibr_fantasy_world_cup.matches.lock_at, excluded.lock_at),
         venue = excluded.venue,
@@ -804,7 +824,7 @@ async function saveLiveMatchStatus(sql: Sql, match: ObservedMatch) {
 
   const updateRows = (await sql`
     update mibr_fantasy_world_cup.matches
-    set provider_match_id = ${match.providerMatchId ?? null},
+      set provider_match_id = ${match.providerMatchId ?? null},
         kickoff_at = ${match.kickoffAt},
         lock_at = least(lock_at, ${match.lockAt}),
         status = ${match.status},
@@ -816,7 +836,10 @@ async function saveLiveMatchStatus(sql: Sql, match: ObservedMatch) {
     where provider_match_id = ${match.providerMatchId ?? ""}
        or (
         stage = ${match.stage}
-        and group_name is not distinct from ${match.groupName ?? null}
+        and case
+          when group_name ~* '^GROUP[_ -]?[A-L]$' then 'Group ' || upper(right(group_name, 1))
+          else group_name
+        end is not distinct from ${normalizeGroupName(match.groupName) ?? null}
         and home_team_id = ${match.homeTeam.id}
         and away_team_id = ${match.awayTeam.id}
       )
