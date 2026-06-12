@@ -1,0 +1,41 @@
+{
+  "name": "mibr-fantasy-world-cup",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run lint && npm run typecheck",
+    "poc:espn": "node --dns-result-order=ipv4first scripts/poc-espn-scoreboard.mjs",
+    "test:score-matrix-ui": "node scripts/test-score-matrix-ui.mjs",
+    "sync:manual": "node --env-file=.env.local scripts/run-manual-sync.mjs",
+    "sync:manual:live": "node --env-file=.env.local scripts/run-manual-sync.mjs --scope=live",
+    "db:schema": "node --dns-result-order=ipv4first --env-file=.env.local scripts/apply-schema.mjs",
+    "db:seed-users": "node --dns-result-order=ipv4first --env-file=.env.local scripts/seed-authorized-users.mjs",
+    "db:refresh-discord-names": "node --dns-result-order=ipv4first --env-file=.env.local scripts/refresh-discord-display-labels.mjs",
+    "db:backup-json": "node --dns-result-order=ipv4first --env-file=.env.local scripts/export-database-json.mjs",
+    "db:migrate-match-ids": "node --dns-result-order=ipv4first --env-file=.env.local scripts/migrate-match-ids.mjs"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^1.1.0",
+    "lucide-react": "^1.17.0",
+    "next": "16.2.6",
+    "next-auth": "^4.24.14",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.6",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
