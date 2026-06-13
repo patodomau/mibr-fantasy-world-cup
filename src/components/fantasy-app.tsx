@@ -91,6 +91,7 @@ const copy = {
     syncComplete: "Resultados atualizados",
     syncError: "Nao foi possivel atualizar os resultados.",
     syncUpdatedMatches: "Jogos atualizados",
+    syncConsolidatedMatches: "Jogos consolidados",
     consolidatedMatches: "Jogos consolidados",
     sourceStatus: "Fontes",
     usersPerPage: "10 usuarios por pagina",
@@ -164,6 +165,7 @@ const copy = {
     syncComplete: "Results updated",
     syncError: "Could not update results.",
     syncUpdatedMatches: "Updated games",
+    syncConsolidatedMatches: "Consolidated games",
     consolidatedMatches: "Consolidated games",
     sourceStatus: "Sources",
     usersPerPage: "10 users per page",
@@ -1107,6 +1109,7 @@ function AdminPanel({
       });
       const payload = (await response.json()) as {
         result?: {
+          consolidatedMatches?: number;
           updatedMatches?: number;
         };
         error?: string;
@@ -1116,11 +1119,14 @@ function AdminPanel({
         throw new Error(payload.error ?? t.syncError);
       }
 
+      const consolidatedMatches = payload.result?.consolidatedMatches;
       const updatedMatches = payload.result?.updatedMatches;
       setSyncMessage(
-        Number.isFinite(updatedMatches)
-          ? `${t.syncComplete}. ${t.syncUpdatedMatches}: ${updatedMatches}`
-          : t.syncComplete,
+        Number.isFinite(consolidatedMatches)
+          ? `${t.syncComplete}. ${t.syncConsolidatedMatches}: ${consolidatedMatches}`
+          : Number.isFinite(updatedMatches)
+            ? `${t.syncComplete}. ${t.syncUpdatedMatches}: ${updatedMatches}`
+            : t.syncComplete,
       );
       onDataChanged();
     } catch (error) {
