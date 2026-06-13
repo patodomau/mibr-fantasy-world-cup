@@ -1,6 +1,6 @@
 "use client";
 
-import { Brackets, Gamepad2, Settings, Trophy } from "lucide-react";
+import { Brackets, Gamepad2, RefreshCw, Settings, Trophy } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -86,6 +86,11 @@ const copy = {
     removeUserTitle: "Desativar usuario",
     removeUserText: "Esta acao desativa o acesso deste usuario ao fantasy, mantendo seus palpites. Confirme para continuar.",
     syncStatus: "Sync dos jogos",
+    syncNow: "Atualizar resultados",
+    syncingNow: "Atualizando...",
+    syncComplete: "Resultados atualizados",
+    syncError: "Nao foi possivel atualizar os resultados.",
+    syncUpdatedMatches: "Jogos atualizados",
     consolidatedMatches: "Jogos consolidados",
     sourceStatus: "Fontes",
     usersPerPage: "10 usuarios por pagina",
@@ -154,6 +159,11 @@ const copy = {
     removeUserTitle: "Disable user",
     removeUserText: "This disables this user's fantasy access while keeping their picks. Confirm to continue.",
     syncStatus: "Match sync",
+    syncNow: "Update results",
+    syncingNow: "Updating...",
+    syncComplete: "Results updated",
+    syncError: "Could not update results.",
+    syncUpdatedMatches: "Updated games",
     consolidatedMatches: "Consolidated games",
     sourceStatus: "Sources",
     usersPerPage: "10 users per page",
@@ -1016,12 +1026,14 @@ function AdminPanel({
   users,
   locale,
   currentUserId,
+  currentUserRole,
   syncOverview,
   onDataChanged,
 }: {
   users: AdminUser[];
   locale: Locale;
   currentUserId?: string;
+  currentUserRole?: "owner" | "admin" | "player";
   syncOverview: MatchSyncOverview;
   onDataChanged: () => void;
 }) {
@@ -1030,7 +1042,10 @@ function AdminPanel({
   const [paidOverrides, setPaidOverrides] = useState<Record<string, boolean>>({});
   const [removedUserIds, setRemovedUserIds] = useState<Set<string>>(() => new Set());
   const [pendingRemove, setPendingRemove] = useState<AdminUser | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const pageSize = 10;
+  const canTriggerSync = currentUserRole === "owner";
   const rows = useMemo(
     () =>
       users
@@ -1082,18 +1097,63 @@ function AdminPanel({
     }
   };
 
+  const triggerSync = async () => {
+    setSyncing(true);
+    setSyncMessage(null);
+
+    try {
+      const response = await fetch("/api/admin/sync", {
+        method: "POST",
+      });
+      const payload = (await response.json()) as {
+        result?: {
+          updatedMatches?: number;
+        };
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? t.syncError);
+      }
+
+      const updatedMatches = payload.result?.updatedMatches;
+      setSyncMessage(
+        Number.isFinite(updatedMatches)
+          ? `${t.syncComplete}. ${t.syncUpdatedMatches}: ${updatedMatches}`
+          : t.syncComplete,
+      );
+      onDataChanged();
+    } catch (error) {
+      setSyncMessage(error instanceof Error ? error.message : t.syncError);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <section className="guild-frame bg-[var(--card)] p-4">
         <div className="relative z-10 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-xl font-black text-amber-100">{t.syncStatus}</h2>
-            <div className="flex flex-wrap gap-2 text-xs font-black uppercase">
+            <div className="flex flex-wrap items-center gap-2 text-xs font-black uppercase">
               <span className="border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-emerald-100">
                 {t.consolidatedMatches}: {syncOverview.consolidatedMatches}
               </span>
+              {canTriggerSync ? (
+                <button
+                  className="inline-flex items-center gap-2 border border-amber-400/50 bg-amber-500/15 px-3 py-2 text-amber-100 transition hover:bg-amber-500/24 disabled:cursor-wait disabled:opacity-60"
+                  disabled={syncing}
+                  onClick={() => void triggerSync()}
+                  type="button"
+                >
+                  <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} aria-hidden="true" />
+                  {syncing ? t.syncingNow : t.syncNow}
+                </button>
+              ) : null}
             </div>
           </div>
+          {syncMessage ? <div className="text-sm font-bold text-amber-200">{syncMessage}</div> : null}
           <div>
             <h3 className="mb-2 text-xs font-black uppercase tracking-[0.16em] text-stone-400">
               {t.sourceStatus}
@@ -1466,6 +1526,7 @@ export function FantasyApp({ matches, leaderboard, adminUsers, syncOverview, ini
           {panel === "admin" && isAdmin ? (
             <AdminPanel
               currentUserId={user.discordUserId}
+              currentUserRole={user.role}
               locale={locale}
               onDataChanged={() => router.refresh()}
               syncOverview={syncOverview}
