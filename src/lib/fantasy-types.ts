@@ -125,6 +125,29 @@ export const STAGE_LABELS: Record<Stage, { en: string; pt: string }> = {
   FINAL: { en: "Final", pt: "Final" },
 };
 
+export const KNOCKOUT_STAGES: readonly Stage[] = [
+  "ROUND_OF_32",
+  "ROUND_OF_16",
+  "QUARTER_FINALS",
+  "SEMI_FINALS",
+  "THIRD_PLACE",
+  "FINAL",
+];
+
+export function isKnockoutStage(stage: Stage) {
+  return KNOCKOUT_STAGES.includes(stage);
+}
+
+export function getKnockoutLockAt(matches: Match[]) {
+  const lockValues = matches
+    .filter((match) => isKnockoutStage(match.stage))
+    .map((match) => match.lockAt || match.kickoffAt)
+    .filter((value): value is string => Boolean(value))
+    .sort();
+
+  return lockValues[0];
+}
+
 export function getWinnerFromScore(homeScore: number, awayScore: number): WinnerPick {
   if (homeScore > awayScore) {
     return "home";
@@ -137,13 +160,25 @@ export function getWinnerFromScore(homeScore: number, awayScore: number): Winner
   return "draw";
 }
 
-export function validatePrediction(draft: PredictionDraft) {
+export function validatePrediction(
+  draft: PredictionDraft,
+  options: { allowDraw?: boolean; allowScores?: boolean } = {},
+) {
+  const allowDraw = options.allowDraw ?? true;
+  const allowScores = options.allowScores ?? true;
+
   if (!draft.predictedWinner) {
     return { valid: false, message: "Choose a winner or draw first." };
+  }
+  if (!allowDraw && draft.predictedWinner === "draw") {
+    return { valid: false, message: "Choose a team to advance." };
   }
 
   const hasHomeScore = Number.isInteger(draft.predictedHomeScore);
   const hasAwayScore = Number.isInteger(draft.predictedAwayScore);
+  if (!allowScores && (hasHomeScore || hasAwayScore)) {
+    return { valid: false, message: "Knockout picks only choose who advances." };
+  }
 
   if (hasHomeScore !== hasAwayScore) {
     return { valid: false, message: "Fill both score boxes or leave both blank." };

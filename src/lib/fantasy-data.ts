@@ -8,6 +8,7 @@ import {
   buildMatchKey,
   isMatchPickable,
   isMatchLocked,
+  isKnockoutStage,
   validatePrediction,
   type AdminUser,
   type LeaderboardEntry,
@@ -675,6 +676,10 @@ export async function savePrediction(discordUserId: string, draft: PredictionDra
   }
 
   const match = await refreshMatchStatusBeforePick(sql, loadedMatch);
+
+  if (isKnockoutStage(match.stage)) {
+    throw new Error("Use the knockout bracket to submit knockout picks");
+  }
 
   if (isMatchLocked(match)) {
     throw new Error("Match is closed for picks");

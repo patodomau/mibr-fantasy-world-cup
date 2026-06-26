@@ -4,6 +4,8 @@ import { Brackets, Check, ChevronDown, Gamepad2, RefreshCw, Settings, Trophy } f
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  getKnockoutLockAt,
+  isKnockoutStage,
   isMatchPickable,
   isMatchLocked,
   STAGE_LABELS,
@@ -124,8 +126,10 @@ const copy = {
     knockoutSaving: "Salvando chave...",
     knockoutSaved: "Chave mata-mata salva",
     knockoutPickHint: "Escolha quem avanca em cada confronto. Cada acerto vale 5 pontos.",
+    knockoutReadOnlyHint: "Visualizacao da chave e resultados do mata-mata.",
     knockoutChampion: "Campeao",
     knockoutIncomplete: "Complete a chave ate a final antes de salvar.",
+    knockoutLock: "A chave trava 5 minutos antes do primeiro jogo do mata-mata.",
     knockout: "Mata-mata",
     groupTable: "Jogos do grupo",
     rankingPlayer: "Jogador",
@@ -215,8 +219,10 @@ const copy = {
     knockoutSaving: "Saving bracket...",
     knockoutSaved: "Knockout bracket saved",
     knockoutPickHint: "Choose who advances in every matchup. Each correct pick is worth 5 points.",
+    knockoutReadOnlyHint: "Knockout bracket and results view.",
     knockoutChampion: "Champion",
     knockoutIncomplete: "Complete the bracket through the final before saving.",
+    knockoutLock: "The bracket locks 5 minutes before the first knockout match.",
     knockout: "Knockout",
     groupTable: "Group games",
     rankingPlayer: "Player",
@@ -304,6 +310,12 @@ function localizeValidationMessage(message: string | null, locale: Locale) {
   }
   if (message === "The score must match the selected result.") {
     return t.errorWinnerMismatch;
+  }
+  if (message === "Choose a team to advance.") {
+    return t.errorChoose;
+  }
+  if (message === "Knockout picks only choose who advances.") {
+    return t.knockoutPickHint;
   }
 
   return message;
@@ -731,8 +743,9 @@ function MatchCard({
   saving: boolean;
 }) {
   const t = copy[locale];
+  const knockout = isKnockoutStage(match.stage);
   const locked = isMatchLocked(match);
-  const validation = validatePrediction(draft);
+  const validation = validatePrediction(draft, { allowDraw: !knockout, allowScores: !knockout });
   const hasPick = Boolean(draft.predictedWinner);
 
   const chooseWinner = (winner: WinnerPick) => {
@@ -769,19 +782,25 @@ function MatchCard({
           <button disabled={locked} onClick={() => chooseWinner("home")} type="button">
             <TeamBlock side={match.homeTeam} selected={draft.predictedWinner === "home"} />
           </button>
-          <button
-            className={[
-              "flex min-h-24 w-16 items-center justify-center border px-2 text-xs font-bold uppercase text-stone-200 transition",
-              draft.predictedWinner === "draw"
-                ? "border-amber-400 bg-amber-500/12"
-                : "border-white/10 bg-black/20",
-            ].join(" ")}
-            disabled={locked}
-            onClick={() => chooseWinner("draw")}
-            type="button"
-          >
-            {t.draw}
-          </button>
+          {knockout ? (
+            <div className="flex min-h-24 w-16 items-center justify-center border border-white/10 bg-black/20 px-2 text-xs font-bold uppercase text-stone-500">
+              VS
+            </div>
+          ) : (
+            <button
+              className={[
+                "flex min-h-24 w-16 items-center justify-center border px-2 text-xs font-bold uppercase text-stone-200 transition",
+                draft.predictedWinner === "draw"
+                  ? "border-amber-400 bg-amber-500/12"
+                  : "border-white/10 bg-black/20",
+              ].join(" ")}
+              disabled={locked}
+              onClick={() => chooseWinner("draw")}
+              type="button"
+            >
+              {t.draw}
+            </button>
+          )}
           <button disabled={locked} onClick={() => chooseWinner("away")} type="button">
             <TeamBlock side={match.awayTeam} selected={draft.predictedWinner === "away"} />
           </button>
@@ -790,24 +809,26 @@ function MatchCard({
         {hasPick ? (
           <div className="border border-amber-500/20 bg-stone-950/50 p-3">
             <div className="mb-3 flex items-center justify-between gap-3 text-sm">
-              <span className="font-bold text-amber-200">{t.scoreGuess}</span>
+              <span className="font-bold text-amber-200">{knockout ? t.knockoutPickHint : t.scoreGuess}</span>
               <span className="text-xs text-stone-400">
                 {t.lock}: {formatDate(match.lockAt, locale)}
               </span>
             </div>
-            <div className="flex items-center justify-center gap-3">
-              <ScoreInput
-                disabled={locked}
-                onChange={(value) => onDraft({ ...draft, predictedHomeScore: value })}
-                value={draft.predictedHomeScore}
-              />
-              <span className="text-lg font-bold text-stone-500">x</span>
-              <ScoreInput
-                disabled={locked}
-                onChange={(value) => onDraft({ ...draft, predictedAwayScore: value })}
-                value={draft.predictedAwayScore}
-              />
-            </div>
+            {knockout ? null : (
+              <div className="flex items-center justify-center gap-3">
+                <ScoreInput
+                  disabled={locked}
+                  onChange={(value) => onDraft({ ...draft, predictedHomeScore: value })}
+                  value={draft.predictedHomeScore}
+                />
+                <span className="text-lg font-bold text-stone-500">x</span>
+                <ScoreInput
+                  disabled={locked}
+                  onChange={(value) => onDraft({ ...draft, predictedAwayScore: value })}
+                  value={draft.predictedAwayScore}
+                />
+              </div>
+            )}
             {!validation.valid ? (
               <p className="mt-3 text-center text-xs font-semibold text-red-300">
                 {localizeValidationMessage(validation.message, locale)}
@@ -912,7 +933,12 @@ function ClosedMatchCard({
 function GamesPanel({
   matches,
   drafts,
+  initialKnockoutSubmission,
+  knockoutSaveError,
+  knockoutSaved,
+  knockoutSaving,
   locale,
+  onSaveKnockout,
   savedDrafts,
   saveErrors,
   savingDrafts,
@@ -922,7 +948,12 @@ function GamesPanel({
 }: {
   matches: Match[];
   drafts: Record<string, StoredPrediction>;
+  initialKnockoutSubmission?: KnockoutSubmission;
+  knockoutSaveError?: string;
+  knockoutSaved: boolean;
+  knockoutSaving: boolean;
   locale: Locale;
+  onSaveKnockout: (picks: Record<string, string>, championTeamId: string) => void;
   savedDrafts: Record<string, boolean>;
   saveErrors: Record<string, string | undefined>;
   savingDrafts: Record<string, boolean>;
@@ -932,7 +963,11 @@ function GamesPanel({
 }) {
   const [gamesTab, setGamesTab] = useState<GamesTab>("open");
   const [dateSort, setDateSort] = useState<DateSort>("asc");
-  const [stageFilter, setStageFilter] = useState<StageFilter>("all");
+  const [stageFilter, setStageFilter] = useState<StageFilter>(() =>
+    matches.some((match) => isKnockoutStage(match.stage) && hasResolvedTeams(match) && isMatchPickable(match))
+      ? "ROUND_OF_32"
+      : "all",
+  );
   const [firstTeamFilter, setFirstTeamFilter] = useState("all");
   const [secondTeamFilter, setSecondTeamFilter] = useState("all");
   const [openTimeRangeOnly, setOpenTimeRangeOnly] = useState(false);
@@ -988,6 +1023,8 @@ function GamesPanel({
         ? t.noOpenGames
         : t.noClosedGames
       : t.noFilteredGames;
+  const showingKnockoutPicker =
+    gamesTab === "open" && activeStageFilter !== "all" && isKnockoutStage(activeStageFilter);
 
   return (
     <div className="space-y-6">
@@ -1075,14 +1112,29 @@ function GamesPanel({
         />
       </div>
 
-      {visibleMatches.length === 0 ? (
+      {showingKnockoutPicker ? (
+        <BracketPanel
+          initialKnockoutSubmission={initialKnockoutSubmission}
+          knockoutSaveError={knockoutSaveError}
+          knockoutSaved={knockoutSaved}
+          knockoutSaving={knockoutSaving}
+          locale={locale}
+          matches={matches}
+          onSaveKnockout={onSaveKnockout}
+          readOnly={false}
+          showTabs={false}
+        />
+      ) : null}
+
+      {!showingKnockoutPicker && visibleMatches.length === 0 ? (
         <div className="guild-frame bg-[var(--card)] p-6 text-sm font-bold text-stone-300">
           <div className="relative z-10">{emptyMessage}</div>
         </div>
       ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        {visibleMatches.map((match) =>
+      {!showingKnockoutPicker ? (
+        <div className="grid gap-4 lg:grid-cols-2">
+          {visibleMatches.map((match) =>
           gamesTab === "open" ? (
             <MatchCard
               draft={drafts[match.id] ?? { matchId: match.id }}
@@ -1106,8 +1158,9 @@ function GamesPanel({
               match={match}
             />
           ),
-        )}
-      </div>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1280,6 +1333,8 @@ function BracketPanel({
   locale,
   matches,
   onSaveKnockout,
+  readOnly = true,
+  showTabs = true,
 }: {
   initialKnockoutSubmission?: KnockoutSubmission;
   knockoutSaveError?: string;
@@ -1288,6 +1343,8 @@ function BracketPanel({
   locale: Locale;
   matches: Match[];
   onSaveKnockout: (picks: Record<string, string>, championTeamId: string) => void;
+  readOnly?: boolean;
+  showTabs?: boolean;
 }) {
   const t = copy[locale];
   const groupNames = Array.from(
@@ -1298,7 +1355,9 @@ function BracketPanel({
         .filter((groupName): groupName is string => Boolean(groupName)),
     ),
   ).sort((a, b) => a.localeCompare(b));
-  const [activeBracketTab, setActiveBracketTab] = useState<string>(groupNames[0] ?? "knockout");
+  const [activeBracketTab, setActiveBracketTab] = useState<string>(
+    showTabs ? groupNames[0] ?? "knockout" : "knockout",
+  );
   const activeGroupMatches = matches.filter(
     (match) => match.stage === "GROUP_STAGE" && match.groupName === activeBracketTab,
   );
@@ -1310,6 +1369,11 @@ function BracketPanel({
     () => buildKnockoutDisplay(knockoutMatches, knockoutPicks),
     [knockoutMatches, knockoutPicks],
   );
+  const [currentTime, setCurrentTime] = useState(() => Date.now());
+  useEffect(() => {
+    const interval = window.setInterval(() => setCurrentTime(Date.now()), 30000);
+    return () => window.clearInterval(interval);
+  }, []);
   const finalDisplayMatch = knockoutDisplay.find((entry) => entry.match.stage === "FINAL");
   const championTeamId = finalDisplayMatch?.selectedTeamId;
   const champion = finalDisplayMatch
@@ -1323,8 +1387,13 @@ function BracketPanel({
     knockoutDisplay.length > 0 &&
     knockoutDisplay.every((entry) => !entry.selectable || Boolean(entry.selectedTeamId)) &&
     Boolean(championTeamId);
+  const knockoutLockAt = getKnockoutLockAt(matches);
+  const knockoutLocked = knockoutLockAt ? currentTime >= new Date(knockoutLockAt).getTime() : false;
 
   const chooseKnockoutWinner = (matchId: string, teamId: string) => {
+    if (readOnly || knockoutLocked) {
+      return;
+    }
     setKnockoutPicks((current) => {
       const next = { ...current, [matchId]: teamId };
       const display = buildKnockoutDisplay(knockoutMatches, next);
@@ -1352,7 +1421,8 @@ function BracketPanel({
           <h2 className="text-xl font-black text-amber-100">{t.bracket}</h2>
           <p className="max-w-2xl text-sm text-stone-400">{t.bracketHint}</p>
         </div>
-        <div className="relative z-10 mt-4 flex flex-wrap gap-2">
+        {showTabs ? (
+          <div className="relative z-10 mt-4 flex flex-wrap gap-2">
           {groupNames.map((groupName) => (
             <button
               className={[
@@ -1380,7 +1450,8 @@ function BracketPanel({
           >
             {t.knockout}
           </button>
-        </div>
+          </div>
+        ) : null}
       </section>
       {activeBracketTab !== "knockout" ? (
         <section className="guild-frame bg-[var(--card)] p-4">
@@ -1465,7 +1536,14 @@ function BracketPanel({
             <div className="relative z-10 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="text-xl font-black text-amber-100">{t.knockout}</h2>
-                <p className="mt-1 text-sm text-stone-400">{t.knockoutPickHint}</p>
+                <p className="mt-1 text-sm text-stone-400">
+                  {readOnly ? t.knockoutReadOnlyHint : t.knockoutPickHint}
+                </p>
+                {!readOnly && knockoutLockAt ? (
+                  <p className="mt-1 text-xs font-semibold text-amber-200">
+                    {t.knockoutLock} {formatDate(knockoutLockAt, locale)}
+                  </p>
+                ) : null}
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 {champion ? (
@@ -1473,9 +1551,10 @@ function BracketPanel({
                     {t.knockoutChampion}: {champion.shortName}
                   </div>
                 ) : null}
-                <button
+                {!readOnly ? (
+                  <button
                   className="border border-amber-400/45 bg-amber-500 px-4 py-2 text-sm font-black text-stone-950 transition hover:bg-amber-300 disabled:border-white/10 disabled:bg-white/10 disabled:text-stone-500"
-                  disabled={!completeKnockout || knockoutSaving}
+                  disabled={!completeKnockout || knockoutSaving || knockoutLocked}
                   onClick={() => {
                     if (championTeamId) {
                       onSaveKnockout(knockoutPicks, championTeamId);
@@ -1485,15 +1564,16 @@ function BracketPanel({
                 >
                   {knockoutSaving ? t.knockoutSaving : t.knockoutSave}
                 </button>
+                ) : null}
               </div>
             </div>
-            {!completeKnockout ? (
+            {!readOnly && !completeKnockout ? (
               <p className="relative z-10 mt-3 text-xs font-semibold text-amber-200">{t.knockoutIncomplete}</p>
             ) : null}
-            {knockoutSaved ? (
+            {!readOnly && knockoutSaved ? (
               <p className="relative z-10 mt-3 text-xs font-semibold text-emerald-300">{t.knockoutSaved}</p>
             ) : null}
-            {knockoutSaveError ? (
+            {!readOnly && knockoutSaveError ? (
               <p className="relative z-10 mt-3 text-xs font-semibold text-red-300">{knockoutSaveError}</p>
             ) : null}
           </section>
@@ -1516,14 +1596,14 @@ function BracketPanel({
                         <div className="absolute -bottom-2 left-1/2 h-4 w-px bg-white/15" />
                         <div className="border border-white/12 bg-black/34 p-2 shadow-lg">
                           <KnockoutTeamButton
-                            disabled={!entry.selectable}
+                            disabled={readOnly || knockoutLocked || !entry.selectable}
                             onPick={() => chooseKnockoutWinner(entry.match.id, entry.homeTeam.id)}
                             selected={entry.selectedTeamId === entry.homeTeam.id}
                             team={entry.homeTeam}
                           />
                           <div className="mt-1" />
                           <KnockoutTeamButton
-                            disabled={!entry.selectable}
+                            disabled={readOnly || knockoutLocked || !entry.selectable}
                             onPick={() => chooseKnockoutWinner(entry.match.id, entry.awayTeam.id)}
                             selected={entry.selectedTeamId === entry.awayTeam.id}
                             team={entry.awayTeam}
@@ -2084,9 +2164,14 @@ export function FantasyApp({
           {panel === "games" ? (
             <GamesPanel
               drafts={drafts}
+              initialKnockoutSubmission={initialKnockoutSubmission}
+              knockoutSaveError={knockoutSaveError}
+              knockoutSaved={knockoutSaved}
+              knockoutSaving={knockoutSaving}
               locale={locale}
               matches={matches}
               onSaveDraft={(draft) => void saveDraft(draft)}
+              onSaveKnockout={(picks, championTeamId) => void saveKnockout(picks, championTeamId)}
               saveErrors={saveErrors}
               savedDrafts={savedDrafts}
               savingDrafts={savingDrafts}
@@ -2104,6 +2189,8 @@ export function FantasyApp({
               locale={locale}
               matches={matches}
               onSaveKnockout={(picks, championTeamId) => void saveKnockout(picks, championTeamId)}
+              readOnly
+              showTabs
             />
           ) : null}
           {panel === "admin" && isAdmin ? (
