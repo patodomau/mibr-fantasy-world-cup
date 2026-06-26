@@ -682,6 +682,19 @@ function isOpenForPicks(match: Match) {
   return isMatchPickable(match);
 }
 
+function isKnockoutBracketOpen(matches: Match[], now = new Date()) {
+  const lockAt = getKnockoutLockAt(matches);
+  return Boolean(lockAt && now.getTime() < new Date(lockAt).getTime());
+}
+
+function isOpenInGamesTab(match: Match, matches: Match[]) {
+  if (isKnockoutStage(match.stage)) {
+    return hasResolvedTeams(match) && isKnockoutBracketOpen(matches);
+  }
+
+  return isOpenForPicks(match);
+}
+
 function isPendingTeam(team: Match["homeTeam"]) {
   const value = `${team.id} ${team.name} ${team.shortName} ${team.abbreviation}`.toLowerCase();
   return (
@@ -704,11 +717,15 @@ function getPreferredOpenStageFilter(matches: Match[]): StageFilter {
     return "GROUP_STAGE";
   }
 
+  if (!isKnockoutBracketOpen(matches)) {
+    return "all";
+  }
+
   return (
     stageOrder.find(
       (stage) =>
         isKnockoutStage(stage) &&
-        matches.some((match) => match.stage === stage && hasResolvedTeams(match) && isOpenForPicks(match)),
+        matches.some((match) => match.stage === stage && hasResolvedTeams(match)),
     ) ?? "all"
   );
 }
@@ -1073,7 +1090,7 @@ function GamesPanel({
       matches.filter(
         (match) =>
           hasResolvedTeams(match) &&
-          (gamesTab === "open" ? isOpenForPicks(match) : !isOpenForPicks(match)),
+          (gamesTab === "open" ? isOpenInGamesTab(match, matches) : !isOpenInGamesTab(match, matches)),
       ),
     [gamesTab, matches],
   );
