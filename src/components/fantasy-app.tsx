@@ -1,6 +1,6 @@
 "use client";
 
-import { Brackets, Gamepad2, RefreshCw, Settings, Trophy } from "lucide-react";
+import { Brackets, Check, ChevronDown, Gamepad2, RefreshCw, Settings, Trophy } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -8,6 +8,7 @@ import {
   isMatchLocked,
   STAGE_LABELS,
   type AdminUser,
+  type KnockoutSubmission,
   validatePrediction,
   type LeaderboardEntry,
   type Match,
@@ -21,6 +22,8 @@ import {
 type Locale = "pt" | "en";
 type Panel = "games" | "ranking" | "bracket" | "admin";
 type GamesTab = "open" | "closed";
+type DateSort = "asc" | "desc";
+type StageFilter = Stage | "all";
 type StoredPrediction = PredictionDraft | PredictionResult;
 
 type Props = {
@@ -29,6 +32,7 @@ type Props = {
   adminUsers: AdminUser[];
   syncOverview: MatchSyncOverview;
   initialDrafts: Record<string, PredictionResult>;
+  initialKnockoutSubmission?: KnockoutSubmission;
   user: {
     discordUserId?: string;
     displayLabel: string;
@@ -67,6 +71,17 @@ const copy = {
     closedGames: "Jogos encerrados",
     noOpenGames: "Nenhum jogo aberto para palpite agora.",
     noClosedGames: "Nenhum jogo encerrado ainda.",
+    noFilteredGames: "Nenhum jogo encontrado com esse filtro.",
+    sortByDate: "Data",
+    dateAsc: "ASC",
+    dateDesc: "DESC",
+    stageFilter: "Etapa",
+    allStages: "Todas",
+    openTimeRangeToggle: "Jogos nos proximos 2 dias",
+    closedTimeRangeToggle: "Jogos ate 2 dias atras",
+    firstTeamFilter: "Time 1",
+    secondTeamFilter: "Time 2",
+    allTeams: "Qualquer time",
     yourPick: "Seu palpite",
     noPick: "Sem palpite salvo",
     finalResult: "Resultado",
@@ -105,6 +120,12 @@ const copy = {
     lockChip: "Fecha: inicio - 5 min",
     pendingSlot: "A definir",
     bracketHint: "Visualizacao por fase. A pontuacao continua somando o campeonato inteiro.",
+    knockoutSave: "Salvar chave mata-mata",
+    knockoutSaving: "Salvando chave...",
+    knockoutSaved: "Chave mata-mata salva",
+    knockoutPickHint: "Escolha quem avanca em cada confronto. Cada acerto vale 5 pontos.",
+    knockoutChampion: "Campeao",
+    knockoutIncomplete: "Complete a chave ate a final antes de salvar.",
     knockout: "Mata-mata",
     groupTable: "Jogos do grupo",
     rankingPlayer: "Jogador",
@@ -141,6 +162,17 @@ const copy = {
     closedGames: "Closed games",
     noOpenGames: "No games are open for picks right now.",
     noClosedGames: "No closed games yet.",
+    noFilteredGames: "No games match this filter.",
+    sortByDate: "Date",
+    dateAsc: "ASC",
+    dateDesc: "DESC",
+    stageFilter: "Stage",
+    allStages: "All",
+    openTimeRangeToggle: "Matches within 2 days",
+    closedTimeRangeToggle: "Matches up to 2 days before",
+    firstTeamFilter: "Team 1",
+    secondTeamFilter: "Team 2",
+    allTeams: "Any team",
     yourPick: "Your pick",
     noPick: "No saved pick",
     finalResult: "Result",
@@ -179,6 +211,12 @@ const copy = {
     lockChip: "Lock: kickoff - 5 min",
     pendingSlot: "TBD",
     bracketHint: "Phase-by-phase view. Scoring still adds up across the full tournament.",
+    knockoutSave: "Save knockout bracket",
+    knockoutSaving: "Saving bracket...",
+    knockoutSaved: "Knockout bracket saved",
+    knockoutPickHint: "Choose who advances in every matchup. Each correct pick is worth 5 points.",
+    knockoutChampion: "Champion",
+    knockoutIncomplete: "Complete the bracket through the final before saving.",
     knockout: "Knockout",
     groupTable: "Group games",
     rankingPlayer: "Player",
@@ -304,6 +342,245 @@ function TeamBlock({ side, selected }: { side: Match["homeTeam"]; selected: bool
         <div className="text-sm font-bold text-stone-100">{side.abbreviation}</div>
         <div className="truncate text-xs text-stone-400">{side.shortName}</div>
       </div>
+    </div>
+  );
+}
+
+type TeamOption = Pick<Match["homeTeam"], "id" | "abbreviation" | "flagUrl" | "shortName">;
+
+function getTeamOptions(matches: Match[]) {
+  return Array.from(
+    matches
+      .reduce((teams, match) => {
+        for (const team of [match.homeTeam, match.awayTeam]) {
+          if (!teams.has(team.id)) {
+            teams.set(team.id, {
+              id: team.id,
+              abbreviation: team.abbreviation,
+              flagUrl: team.flagUrl,
+              shortName: team.shortName,
+            });
+          }
+        }
+
+        return teams;
+      }, new Map<string, TeamOption>())
+      .values(),
+  ).sort((left, right) => left.abbreviation.localeCompare(right.abbreviation));
+}
+
+function compareMatchesByDate(left: Match, right: Match, sort: DateSort) {
+  const dateDelta = new Date(left.kickoffAt).getTime() - new Date(right.kickoffAt).getTime();
+  const orderedDelta = sort === "asc" ? dateDelta : -dateDelta;
+
+  return orderedDelta || left.id.localeCompare(right.id);
+}
+
+function isWithinTabTimeRange(match: Match, gamesTab: GamesTab) {
+  const now = Date.now();
+  const twoDays = 2 * 24 * 60 * 60 * 1000;
+  const kickoff = new Date(match.kickoffAt).getTime();
+
+  if (gamesTab === "open") {
+    return kickoff >= now && kickoff <= now + twoDays;
+  }
+
+  return kickoff <= now && kickoff >= now - twoDays;
+}
+
+function TeamFilterDropdown({
+  allLabel,
+  label,
+  onChange,
+  options,
+  selectedId,
+}: {
+  allLabel: string;
+  label: string;
+  onChange: (teamId: string) => void;
+  options: TeamOption[];
+  selectedId: string;
+}) {
+  const selected = options.find((team) => team.id === selectedId);
+  const [open, setOpen] = useState(false);
+  const [menuRect, setMenuRect] = useState<{ left: number; top: number; width: number } | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  const toggleOpen = () => {
+    const rect = triggerRef.current?.getBoundingClientRect();
+    if (rect) {
+      setMenuRect({
+        left: rect.left,
+        top: Math.min(rect.bottom + 6, window.innerHeight - 160),
+        width: Math.max(rect.width, 240),
+      });
+    }
+    setOpen((current) => !current);
+  };
+
+  return (
+    <div className="relative min-w-44 flex-1 sm:flex-none">
+      <button
+        className="flex h-12 w-full items-center justify-between gap-3 border border-white/10 bg-black/30 px-3 text-left text-sm font-bold text-stone-100 shadow-lg shadow-black/20 transition hover:border-amber-500/40 hover:bg-black/45"
+        onClick={toggleOpen}
+        ref={triggerRef}
+        type="button"
+      >
+        <span className="min-w-0">
+          <span className="block text-[0.65rem] font-black uppercase text-stone-500">{label}</span>
+          {selected ? (
+            <span className="mt-0.5 flex min-w-0 items-center gap-2">
+              <img
+                alt=""
+                className="h-4 w-6 shrink-0 border border-white/15 object-cover"
+                loading="lazy"
+                src={selected.flagUrl}
+              />
+              <span className="truncate">{selected.abbreviation}</span>
+            </span>
+          ) : (
+            <span className="mt-0.5 block truncate">{allLabel}</span>
+          )}
+        </span>
+        <ChevronDown className="h-4 w-4 shrink-0 text-amber-300" aria-hidden="true" />
+      </button>
+
+      {open ? (
+        <>
+          <button className="fixed inset-0 z-30 cursor-default bg-transparent" onClick={() => setOpen(false)} type="button" />
+          <div
+            className="fantasy-scrollbar fixed z-[80] max-h-80 overflow-y-auto border border-amber-500/30 bg-stone-950 p-1 shadow-2xl shadow-black/50"
+            style={{
+              left: menuRect?.left ?? 0,
+              top: menuRect?.top ?? 0,
+              width: menuRect?.width ?? 240,
+            }}
+          >
+          <button
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-bold text-stone-200 transition hover:bg-amber-500/15"
+            onClick={() => {
+              onChange("all");
+              setOpen(false);
+            }}
+            type="button"
+          >
+            <span className="min-w-0 flex-1 truncate">{allLabel}</span>
+            {selectedId === "all" ? <Check className="h-4 w-4 text-emerald-300" aria-hidden="true" /> : null}
+          </button>
+            {options.map((team) => (
+              <button
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-bold text-stone-200 transition hover:bg-amber-500/15"
+                key={team.id}
+                onClick={() => {
+                  onChange(team.id);
+                  setOpen(false);
+                }}
+                type="button"
+              >
+                <img
+                  alt=""
+                  className="h-5 w-7 shrink-0 border border-white/15 object-cover"
+                  loading="lazy"
+                  src={team.flagUrl}
+                />
+                <span className="w-10 text-amber-100">{team.abbreviation}</span>
+                <span className="min-w-0 flex-1 truncate text-xs text-stone-400">{team.shortName}</span>
+                {team.id === selectedId ? <Check className="h-4 w-4 text-emerald-300" aria-hidden="true" /> : null}
+              </button>
+            ))}
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function StageFilterDropdown({
+  allLabel,
+  label,
+  locale,
+  onChange,
+  options,
+  selectedStage,
+}: {
+  allLabel: string;
+  label: string;
+  locale: Locale;
+  onChange: (stage: StageFilter) => void;
+  options: Stage[];
+  selectedStage: StageFilter;
+}) {
+  const [open, setOpen] = useState(false);
+  const [menuRect, setMenuRect] = useState<{ left: number; top: number; width: number } | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const selectedLabel = selectedStage === "all" ? allLabel : STAGE_LABELS[selectedStage][locale];
+
+  const toggleOpen = () => {
+    const rect = triggerRef.current?.getBoundingClientRect();
+    if (rect) {
+      setMenuRect({
+        left: rect.left,
+        top: Math.min(rect.bottom + 6, window.innerHeight - 160),
+        width: Math.max(rect.width, 220),
+      });
+    }
+    setOpen((current) => !current);
+  };
+
+  return (
+    <div className="relative min-w-44 flex-1 sm:flex-none">
+      <button
+        className="flex h-12 w-full items-center justify-between gap-3 border border-white/10 bg-black/30 px-3 text-left text-sm font-bold text-stone-100 shadow-lg shadow-black/20 transition hover:border-amber-500/40 hover:bg-black/45"
+        onClick={toggleOpen}
+        ref={triggerRef}
+        type="button"
+      >
+        <span className="min-w-0">
+          <span className="block text-[0.65rem] font-black uppercase text-stone-500">{label}</span>
+          <span className="mt-0.5 block truncate">{selectedLabel}</span>
+        </span>
+        <ChevronDown className="h-4 w-4 shrink-0 text-amber-300" aria-hidden="true" />
+      </button>
+
+      {open ? (
+        <>
+          <button className="fixed inset-0 z-30 cursor-default bg-transparent" onClick={() => setOpen(false)} type="button" />
+          <div
+            className="fantasy-scrollbar fixed z-[80] max-h-80 overflow-y-auto border border-amber-500/30 bg-stone-950 p-1 shadow-2xl shadow-black/50"
+            style={{
+              left: menuRect?.left ?? 0,
+              top: menuRect?.top ?? 0,
+              width: menuRect?.width ?? 220,
+            }}
+          >
+            <button
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-bold text-stone-200 transition hover:bg-amber-500/15"
+              onClick={() => {
+                onChange("all");
+                setOpen(false);
+              }}
+              type="button"
+            >
+              <span className="min-w-0 flex-1 truncate">{allLabel}</span>
+              {selectedStage === "all" ? <Check className="h-4 w-4 text-emerald-300" aria-hidden="true" /> : null}
+            </button>
+            {options.map((stage) => (
+              <button
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-bold text-stone-200 transition hover:bg-amber-500/15"
+                key={stage}
+                onClick={() => {
+                  onChange(stage);
+                  setOpen(false);
+                }}
+                type="button"
+              >
+                <span className="min-w-0 flex-1 truncate">{STAGE_LABELS[stage][locale]}</span>
+                {stage === selectedStage ? <Check className="h-4 w-4 text-emerald-300" aria-hidden="true" /> : null}
+              </button>
+            ))}
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }
@@ -649,8 +926,15 @@ function GamesPanel({
   setSavedDrafts: (drafts: Record<string, boolean>) => void;
 }) {
   const [gamesTab, setGamesTab] = useState<GamesTab>("open");
+  const [dateSort, setDateSort] = useState<DateSort>("asc");
+  const [stageFilter, setStageFilter] = useState<StageFilter>("all");
+  const [firstTeamFilter, setFirstTeamFilter] = useState("all");
+  const [secondTeamFilter, setSecondTeamFilter] = useState("all");
+  const [openTimeRangeOnly, setOpenTimeRangeOnly] = useState(false);
+  const [closedTimeRangeOnly, setClosedTimeRangeOnly] = useState(false);
   const t = copy[locale];
-  const visibleMatches = useMemo(
+  const timeRangeOnly = gamesTab === "open" ? openTimeRangeOnly : closedTimeRangeOnly;
+  const baseMatches = useMemo(
     () =>
       matches.filter(
         (match) =>
@@ -659,17 +943,46 @@ function GamesPanel({
       ),
     [gamesTab, matches],
   );
-  const grouped = useMemo(
+  const stageOptions = useMemo(
     () =>
-      stageOrder
-        .map((stage) => ({
-          stage,
-          matches: visibleMatches.filter((match) => match.stage === stage),
-        }))
-        .filter((group) => group.matches.length > 0),
-    [visibleMatches],
+      stageOrder.filter((stage) => baseMatches.some((match) => match.stage === stage)),
+    [baseMatches],
   );
-  const emptyMessage = gamesTab === "open" ? t.noOpenGames : t.noClosedGames;
+  const teamOptions = useMemo(() => getTeamOptions(baseMatches), [baseMatches]);
+  const activeStageFilter =
+    stageFilter === "all" || stageOptions.includes(stageFilter) ? stageFilter : "all";
+  const activeFirstTeamFilter =
+    firstTeamFilter === "all" || teamOptions.some((team) => team.id === firstTeamFilter)
+      ? firstTeamFilter
+      : "all";
+  const activeSecondTeamFilter =
+    secondTeamFilter === "all" || teamOptions.some((team) => team.id === secondTeamFilter)
+      ? secondTeamFilter
+      : "all";
+  const visibleMatches = useMemo(
+    () => {
+      const filteredMatches = baseMatches.filter(
+        (match) => {
+          const matchTeamIds = new Set([match.homeTeam.id, match.awayTeam.id]);
+          return (
+            (activeStageFilter === "all" || match.stage === activeStageFilter) &&
+            (activeFirstTeamFilter === "all" || matchTeamIds.has(activeFirstTeamFilter)) &&
+            (activeSecondTeamFilter === "all" || matchTeamIds.has(activeSecondTeamFilter)) &&
+            (!timeRangeOnly || isWithinTabTimeRange(match, gamesTab))
+          );
+        },
+      );
+
+      return filteredMatches.sort((left, right) => compareMatchesByDate(left, right, dateSort));
+    },
+    [activeFirstTeamFilter, activeSecondTeamFilter, activeStageFilter, baseMatches, dateSort, gamesTab, timeRangeOnly],
+  );
+  const emptyMessage =
+    baseMatches.length === 0
+      ? gamesTab === "open"
+        ? t.noOpenGames
+        : t.noClosedGames
+      : t.noFilteredGames;
 
   return (
     <div className="space-y-6">
@@ -691,44 +1004,105 @@ function GamesPanel({
         ))}
       </div>
 
-      {grouped.length === 0 ? (
+      <div className="flex flex-wrap items-end gap-3 border border-white/10 bg-black/20 p-3">
+        <div>
+          <div className="mb-1 text-[0.65rem] font-black uppercase text-stone-500">{t.sortByDate}</div>
+          <div className="flex overflow-hidden border border-white/10 bg-black/30">
+            {(["asc", "desc"] satisfies DateSort[]).map((sort) => (
+              <button
+                className={[
+                  "h-10 px-3 text-xs font-black transition",
+                  dateSort === sort
+                    ? "bg-amber-500 text-stone-950"
+                    : "text-stone-300 hover:bg-amber-500/15 hover:text-amber-100",
+                ].join(" ")}
+                key={sort}
+                onClick={() => setDateSort(sort)}
+                type="button"
+              >
+                {sort === "asc" ? t.dateAsc : t.dateDesc}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <button
+          className={[
+            "h-10 self-end border px-3 text-xs font-black transition",
+            timeRangeOnly
+              ? "border-emerald-400 bg-emerald-500 text-stone-950"
+              : "border-white/10 bg-black/30 text-stone-300 hover:border-emerald-500/40 hover:text-emerald-100",
+          ].join(" ")}
+          onClick={() => {
+            if (gamesTab === "open") {
+              setOpenTimeRangeOnly((current) => !current);
+              return;
+            }
+            setClosedTimeRangeOnly((current) => !current);
+          }}
+          type="button"
+        >
+          {gamesTab === "open" ? t.openTimeRangeToggle : t.closedTimeRangeToggle}
+        </button>
+
+        <StageFilterDropdown
+          allLabel={t.allStages}
+          label={t.stageFilter}
+          locale={locale}
+          onChange={setStageFilter}
+          options={stageOptions}
+          selectedStage={activeStageFilter}
+        />
+
+        <TeamFilterDropdown
+          allLabel={t.allTeams}
+          label={t.firstTeamFilter}
+          onChange={setFirstTeamFilter}
+          options={teamOptions}
+          selectedId={activeFirstTeamFilter}
+        />
+        <TeamFilterDropdown
+          allLabel={t.allTeams}
+          label={t.secondTeamFilter}
+          onChange={setSecondTeamFilter}
+          options={teamOptions}
+          selectedId={activeSecondTeamFilter}
+        />
+      </div>
+
+      {visibleMatches.length === 0 ? (
         <div className="guild-frame bg-[var(--card)] p-6 text-sm font-bold text-stone-300">
           <div className="relative z-10">{emptyMessage}</div>
         </div>
       ) : null}
 
-      {grouped.map((group) => (
-        <section className="space-y-3" key={group.stage}>
-          <h2 className="text-xl font-black text-amber-100">{STAGE_LABELS[group.stage][locale]}</h2>
-          <div className="grid gap-4 lg:grid-cols-2">
-            {group.matches.map((match) =>
-              gamesTab === "open" ? (
-                <MatchCard
-                  draft={drafts[match.id] ?? { matchId: match.id }}
-                  key={match.id}
-                  locale={locale}
-                  match={match}
-                  onDraft={(draft) => {
-                    setDrafts({ ...drafts, [match.id]: draft });
-                    setSavedDrafts({ ...savedDrafts, [match.id]: false });
-                  }}
-                  onSave={onSaveDraft}
-                  saved={Boolean(savedDrafts[match.id] || hasPoints(drafts[match.id]))}
-                  saveError={saveErrors[match.id]}
-                  saving={Boolean(savingDrafts[match.id])}
-                />
-              ) : (
-                <ClosedMatchCard
-                  draft={drafts[match.id]}
-                  key={match.id}
-                  locale={locale}
-                  match={match}
-                />
-              ),
-            )}
-          </div>
-        </section>
-      ))}
+      <div className="grid gap-4 lg:grid-cols-2">
+        {visibleMatches.map((match) =>
+          gamesTab === "open" ? (
+            <MatchCard
+              draft={drafts[match.id] ?? { matchId: match.id }}
+              key={match.id}
+              locale={locale}
+              match={match}
+              onDraft={(draft) => {
+                setDrafts({ ...drafts, [match.id]: draft });
+                setSavedDrafts({ ...savedDrafts, [match.id]: false });
+              }}
+              onSave={onSaveDraft}
+              saved={Boolean(savedDrafts[match.id] || hasPoints(drafts[match.id]))}
+              saveError={saveErrors[match.id]}
+              saving={Boolean(savingDrafts[match.id])}
+            />
+          ) : (
+            <ClosedMatchCard
+              draft={drafts[match.id]}
+              key={match.id}
+              locale={locale}
+              match={match}
+            />
+          ),
+        )}
+      </div>
     </div>
   );
 }
@@ -808,7 +1182,108 @@ function RankingPanel({ leaderboard, locale }: { leaderboard: LeaderboardEntry[]
   );
 }
 
-function BracketPanel({ matches, locale }: { matches: Match[]; locale: Locale }) {
+type KnockoutDisplayMatch = {
+  match: Match;
+  homeTeam: Match["homeTeam"];
+  awayTeam: Match["awayTeam"];
+  selectedTeamId?: string;
+  selectable: boolean;
+};
+
+function compareKickoffThenId(left: Match, right: Match) {
+  return new Date(left.kickoffAt).getTime() - new Date(right.kickoffAt).getTime() || left.id.localeCompare(right.id);
+}
+
+function buildKnockoutDisplay(matches: Match[], picks: Record<string, string>) {
+  const displayMatches: KnockoutDisplayMatch[] = [];
+  let previousWinners: Match["homeTeam"][] = [];
+
+  for (const stage of stageOrder.filter((item) => item !== "GROUP_STAGE" && item !== "THIRD_PLACE")) {
+    const stageMatches = matches.filter((match) => match.stage === stage).sort(compareKickoffThenId);
+    const stageWinners: Match["homeTeam"][] = [];
+
+    stageMatches.forEach((match, index) => {
+      const homeTeam = previousWinners[index * 2] ?? match.homeTeam;
+      const awayTeam = previousWinners[index * 2 + 1] ?? match.awayTeam;
+      const selectable =
+        !isPendingTeam(homeTeam) &&
+        !isPendingTeam(awayTeam) &&
+        (!previousWinners.length || Boolean(previousWinners[index * 2] && previousWinners[index * 2 + 1]));
+      const selectedTeamId = picks[match.id];
+
+      displayMatches.push({
+        match,
+        homeTeam,
+        awayTeam,
+        selectedTeamId,
+        selectable,
+      });
+
+      if (selectable) {
+        if (selectedTeamId === homeTeam.id) {
+          stageWinners.push(homeTeam);
+        } else if (selectedTeamId === awayTeam.id) {
+          stageWinners.push(awayTeam);
+        }
+      }
+    });
+
+    previousWinners = stageWinners.length === stageMatches.length ? stageWinners : [];
+  }
+
+  return displayMatches;
+}
+
+function KnockoutTeamButton({
+  disabled,
+  onPick,
+  selected,
+  team,
+}: {
+  disabled: boolean;
+  onPick: () => void;
+  selected: boolean;
+  team: Match["homeTeam"];
+}) {
+  return (
+    <button
+      className={[
+        "flex min-w-0 items-center justify-between gap-2 border px-2 py-2 text-left transition",
+        selected
+          ? "border-emerald-400/70 bg-emerald-500/16 text-emerald-100"
+          : "border-white/10 bg-white/5 text-stone-200 hover:border-amber-400/50",
+        disabled ? "cursor-not-allowed opacity-55 hover:border-white/10" : "",
+      ].join(" ")}
+      disabled={disabled}
+      onClick={onPick}
+      type="button"
+    >
+      <span className="flex min-w-0 items-center gap-2">
+        <img alt="" className="h-6 w-8 shrink-0 border border-white/15 object-cover" src={team.flagUrl} />
+        <span className="truncate text-sm font-bold">{team.abbreviation}</span>
+      </span>
+      {selected ? <Check className="h-4 w-4 shrink-0" aria-hidden="true" /> : null}
+    </button>
+  );
+}
+
+function BracketPanel({
+  initialKnockoutSubmission,
+  knockoutSaveError,
+  knockoutSaved,
+  knockoutSaving,
+  locale,
+  matches,
+  onSaveKnockout,
+}: {
+  initialKnockoutSubmission?: KnockoutSubmission;
+  knockoutSaveError?: string;
+  knockoutSaved: boolean;
+  knockoutSaving: boolean;
+  locale: Locale;
+  matches: Match[];
+  onSaveKnockout: (picks: Record<string, string>, championTeamId: string) => void;
+}) {
   const t = copy[locale];
   const groupNames = Array.from(
     new Set(
@@ -823,6 +1298,47 @@ function BracketPanel({ matches, locale }: { matches: Match[]; locale: Locale })
     (match) => match.stage === "GROUP_STAGE" && match.groupName === activeBracketTab,
   );
   const knockoutMatches = matches.filter((match) => match.stage !== "GROUP_STAGE");
+  const [knockoutPicks, setKnockoutPicks] = useState<Record<string, string>>(
+    () => initialKnockoutSubmission?.picks ?? {},
+  );
+  const knockoutDisplay = useMemo(
+    () => buildKnockoutDisplay(knockoutMatches, knockoutPicks),
+    [knockoutMatches, knockoutPicks],
+  );
+  const finalDisplayMatch = knockoutDisplay.find((entry) => entry.match.stage === "FINAL");
+  const championTeamId = finalDisplayMatch?.selectedTeamId;
+  const champion = finalDisplayMatch
+    ? championTeamId === finalDisplayMatch.homeTeam.id
+      ? finalDisplayMatch.homeTeam
+      : championTeamId === finalDisplayMatch.awayTeam.id
+        ? finalDisplayMatch.awayTeam
+        : undefined
+    : undefined;
+  const completeKnockout =
+    knockoutDisplay.length > 0 &&
+    knockoutDisplay.every((entry) => !entry.selectable || Boolean(entry.selectedTeamId)) &&
+    Boolean(championTeamId);
+
+  const chooseKnockoutWinner = (matchId: string, teamId: string) => {
+    setKnockoutPicks((current) => {
+      const next = { ...current, [matchId]: teamId };
+      const display = buildKnockoutDisplay(knockoutMatches, next);
+      const validMatchIds = new Set(display.map((entry) => entry.match.id));
+
+      for (const entry of display) {
+        if (!entry.selectable || (entry.selectedTeamId !== entry.homeTeam.id && entry.selectedTeamId !== entry.awayTeam.id)) {
+          delete next[entry.match.id];
+        }
+      }
+      for (const matchIdKey of Object.keys(next)) {
+        if (!validMatchIds.has(matchIdKey)) {
+          delete next[matchIdKey];
+        }
+      }
+
+      return next;
+    });
+  };
 
   return (
     <div className="space-y-6">
@@ -939,10 +1455,47 @@ function BracketPanel({ matches, locale }: { matches: Match[]; locale: Locale })
           </div>
         </section>
       ) : (
-        stageOrder
-          .filter((stage) => stage !== "GROUP_STAGE")
+        <>
+          <section className="guild-frame bg-[var(--card)] p-4">
+            <div className="relative z-10 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-black text-amber-100">{t.knockout}</h2>
+                <p className="mt-1 text-sm text-stone-400">{t.knockoutPickHint}</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {champion ? (
+                  <div className="border border-emerald-500/35 bg-emerald-500/10 px-3 py-2 text-sm font-black text-emerald-100">
+                    {t.knockoutChampion}: {champion.shortName}
+                  </div>
+                ) : null}
+                <button
+                  className="border border-amber-400/45 bg-amber-500 px-4 py-2 text-sm font-black text-stone-950 transition hover:bg-amber-300 disabled:border-white/10 disabled:bg-white/10 disabled:text-stone-500"
+                  disabled={!completeKnockout || knockoutSaving}
+                  onClick={() => {
+                    if (championTeamId) {
+                      onSaveKnockout(knockoutPicks, championTeamId);
+                    }
+                  }}
+                  type="button"
+                >
+                  {knockoutSaving ? t.knockoutSaving : t.knockoutSave}
+                </button>
+              </div>
+            </div>
+            {!completeKnockout ? (
+              <p className="relative z-10 mt-3 text-xs font-semibold text-amber-200">{t.knockoutIncomplete}</p>
+            ) : null}
+            {knockoutSaved ? (
+              <p className="relative z-10 mt-3 text-xs font-semibold text-emerald-300">{t.knockoutSaved}</p>
+            ) : null}
+            {knockoutSaveError ? (
+              <p className="relative z-10 mt-3 text-xs font-semibold text-red-300">{knockoutSaveError}</p>
+            ) : null}
+          </section>
+          {stageOrder
+          .filter((stage) => stage !== "GROUP_STAGE" && stage !== "THIRD_PLACE")
           .map((stage) => {
-            const stageMatches = knockoutMatches.filter((match) => match.stage === stage);
+            const stageMatches = knockoutDisplay.filter((entry) => entry.match.stage === stage);
 
             return (
           <section className="guild-frame bg-[var(--card)] p-4" key={stage}>
@@ -952,58 +1505,26 @@ function BracketPanel({ matches, locale }: { matches: Match[]; locale: Locale })
               </h2>
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 {stageMatches.length > 0 ? (
-                  stageMatches.map((match) => {
-                    const homeWon = match.winner === "home";
-                    const awayWon = match.winner === "away";
-                    const hasWinner = Boolean(match.winner);
-
+                  stageMatches.map((entry) => {
                     return (
-                      <div className="relative min-h-24" key={match.id}>
-                        <div
-                          className={
-                            hasWinner
-                              ? "absolute -bottom-2 left-1/2 h-4 w-px bg-emerald-400/80"
-                              : "absolute -bottom-2 left-1/2 h-4 w-px bg-white/15"
-                          }
-                        />
-                        <div
-                          className={[
-                            "border bg-black/34 p-2 shadow-lg",
-                            hasWinner ? "border-emerald-500/45" : "border-white/12",
-                          ].join(" ")}
-                        >
-                          <div
-                            className={[
-                              "flex items-center justify-between gap-2 border px-2 py-1",
-                              homeWon
-                                ? "border-emerald-400/70 bg-emerald-500/16"
-                                : "border-white/10 bg-white/5",
-                            ].join(" ")}
-                          >
-                            <span className="truncate text-sm font-bold text-stone-100">
-                              {match.homeTeam.abbreviation}
-                            </span>
-                            <span className={homeWon ? "font-black text-emerald-200" : "text-stone-400"}>
-                              {match.homeScore ?? "-"}
-                            </span>
-                          </div>
-                          <div
-                            className={[
-                              "mt-1 flex items-center justify-between gap-2 border px-2 py-1",
-                              awayWon
-                                ? "border-emerald-400/70 bg-emerald-500/16"
-                                : "border-white/10 bg-white/5",
-                            ].join(" ")}
-                          >
-                            <span className="truncate text-sm font-bold text-stone-100">
-                              {match.awayTeam.abbreviation}
-                            </span>
-                            <span className={awayWon ? "font-black text-emerald-200" : "text-stone-400"}>
-                              {match.awayScore ?? "-"}
-                            </span>
-                          </div>
+                      <div className="relative min-h-24" key={entry.match.id}>
+                        <div className="absolute -bottom-2 left-1/2 h-4 w-px bg-white/15" />
+                        <div className="border border-white/12 bg-black/34 p-2 shadow-lg">
+                          <KnockoutTeamButton
+                            disabled={!entry.selectable}
+                            onPick={() => chooseKnockoutWinner(entry.match.id, entry.homeTeam.id)}
+                            selected={entry.selectedTeamId === entry.homeTeam.id}
+                            team={entry.homeTeam}
+                          />
+                          <div className="mt-1" />
+                          <KnockoutTeamButton
+                            disabled={!entry.selectable}
+                            onPick={() => chooseKnockoutWinner(entry.match.id, entry.awayTeam.id)}
+                            selected={entry.selectedTeamId === entry.awayTeam.id}
+                            team={entry.awayTeam}
+                          />
                           <div className="mt-2 text-[11px] font-semibold text-stone-500">
-                            {formatDate(match.kickoffAt, locale)}
+                            {formatDate(entry.match.kickoffAt, locale)}
                           </div>
                         </div>
                       </div>
@@ -1018,7 +1539,8 @@ function BracketPanel({ matches, locale }: { matches: Match[]; locale: Locale })
             </div>
           </section>
             );
-          })
+          })}
+        </>
       )}
     </div>
   );
@@ -1292,7 +1814,15 @@ function AdminPanel({
   );
 }
 
-export function FantasyApp({ matches, leaderboard, adminUsers, syncOverview, initialDrafts, user }: Props) {
+export function FantasyApp({
+  matches,
+  leaderboard,
+  adminUsers,
+  syncOverview,
+  initialDrafts,
+  initialKnockoutSubmission,
+  user,
+}: Props) {
   const router = useRouter();
   const [locale, setLocale] = useState<Locale>("pt");
   const [panel, setPanel] = useState<Panel>("games");
@@ -1303,6 +1833,9 @@ export function FantasyApp({ matches, leaderboard, adminUsers, syncOverview, ini
   );
   const [savingDrafts, setSavingDrafts] = useState<Record<string, boolean>>({});
   const [saveErrors, setSaveErrors] = useState<Record<string, string | undefined>>({});
+  const [knockoutSaving, setKnockoutSaving] = useState(false);
+  const [knockoutSaved, setKnockoutSaved] = useState(Boolean(initialKnockoutSubmission));
+  const [knockoutSaveError, setKnockoutSaveError] = useState<string | undefined>();
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioBuffersRef = useRef<Map<string, AudioBuffer>>(new Map());
   const t = copy[locale];
@@ -1357,6 +1890,30 @@ export function FantasyApp({ matches, leaderboard, adminUsers, syncOverview, ini
       setSaveErrors((current) => ({ ...current, [draft.matchId]: message }));
     } finally {
       setSavingDrafts((current) => ({ ...current, [draft.matchId]: false }));
+    }
+  };
+
+  const saveKnockout = async (picks: Record<string, string>, championTeamId: string) => {
+    setKnockoutSaving(true);
+    setKnockoutSaveError(undefined);
+
+    try {
+      const response = await fetch("/api/knockout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ picks, championTeamId }),
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json()) as { error?: string };
+        throw new Error(payload.error ?? "Could not save knockout bracket");
+      }
+
+      setKnockoutSaved(true);
+    } catch (error) {
+      setKnockoutSaveError(error instanceof Error ? error.message : "Could not save knockout bracket");
+    } finally {
+      setKnockoutSaving(false);
     }
   };
 
@@ -1528,7 +2085,17 @@ export function FantasyApp({ matches, leaderboard, adminUsers, syncOverview, ini
             />
           ) : null}
           {panel === "ranking" ? <RankingPanel leaderboard={leaderboard} locale={locale} /> : null}
-          {panel === "bracket" ? <BracketPanel locale={locale} matches={matches} /> : null}
+          {panel === "bracket" ? (
+            <BracketPanel
+              initialKnockoutSubmission={initialKnockoutSubmission}
+              knockoutSaveError={knockoutSaveError}
+              knockoutSaved={knockoutSaved}
+              knockoutSaving={knockoutSaving}
+              locale={locale}
+              matches={matches}
+              onSaveKnockout={(picks, championTeamId) => void saveKnockout(picks, championTeamId)}
+            />
+          ) : null}
           {panel === "admin" && isAdmin ? (
             <AdminPanel
               currentUserId={user.discordUserId}

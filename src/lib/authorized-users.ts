@@ -2,6 +2,7 @@ import "server-only";
 
 import { neon } from "@neondatabase/serverless";
 import { getBootstrapUser, optionalEnv, type AuthorizedRole } from "@/lib/env";
+import { getAwsFantasyState, isMibrAwsApiConfigured } from "@/lib/mibr-aws-api";
 
 export type AuthorizedUser = {
   discordUserId: string;
@@ -22,6 +23,32 @@ type AuthorizedUserRow = {
 };
 
 export async function getDatabaseAuthorizedUser(discordUserId: string) {
+  if (isMibrAwsApiConfigured()) {
+    try {
+      const state = await getAwsFantasyState(discordUserId, true);
+      const user = state.adminUsers.find((candidate) => candidate.discordUserId === discordUserId);
+
+      if (!user) {
+        return { status: "ready" as const, user: null };
+      }
+
+      return {
+        status: "ready" as const,
+        user: {
+          discordUserId: user.discordUserId,
+          displayLabel: user.displayLabel,
+          discordAvatarUrl: user.discordAvatarUrl,
+          role: user.role,
+          paidEntry: user.paidEntry,
+          active: true,
+        },
+      };
+    } catch (error) {
+      console.error("Failed to load MiBR fantasy authorized user from AWS API", error);
+      return { status: "error" as const, user: null };
+    }
+  }
+
   const databaseUrl = optionalEnv("DATABASE_URL");
   if (!databaseUrl) {
     return { status: "unavailable" as const, user: null };
@@ -59,6 +86,10 @@ export async function getDatabaseAuthorizedUser(discordUserId: string) {
 }
 
 export async function upsertLoginProfile(user: AuthorizedUser) {
+  if (isMibrAwsApiConfigured()) {
+    return;
+  }
+
   const databaseUrl = optionalEnv("DATABASE_URL");
   if (!databaseUrl) {
     return;
@@ -125,10 +156,14 @@ export async function resolveAuthorizedUser(discordUserId: string): Promise<Auth
       return null;
     }
 
+    if (!bootstrap) {
+      return null;
+    }
+
     return {
       discordUserId,
-      displayLabel: bootstrap?.displayLabel ?? discordUserId,
-      role: bootstrap?.role ?? "player",
+      displayLabel: bootstrap.displayLabel,
+      role: bootstrap.role,
       paidEntry: false,
       active: true,
     };

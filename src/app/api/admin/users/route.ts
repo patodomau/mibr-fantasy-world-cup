@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { requireFantasySession } from "@/lib/auth";
 import { deactivateUser, updateUserPayment } from "@/lib/fantasy-data";
+import { deactivateAwsUser, isMibrAwsApiConfigured, updateAwsUserPayment } from "@/lib/mibr-aws-api";
 
 export async function PATCH(request: NextRequest) {
   const session = await requireFantasySession();
@@ -19,7 +20,11 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
   }
 
-  await updateUserPayment(payload.discordUserId, payload.paidEntry);
+  if (isMibrAwsApiConfigured()) {
+    await updateAwsUserPayment(payload.discordUserId, payload.paidEntry);
+  } else {
+    await updateUserPayment(payload.discordUserId, payload.paidEntry);
+  }
 
   return NextResponse.json({ ok: true });
 }
@@ -41,7 +46,11 @@ export async function DELETE(request: NextRequest) {
   }
 
   try {
-    await deactivateUser(payload.discordUserId);
+    if (isMibrAwsApiConfigured()) {
+      await deactivateAwsUser(payload.discordUserId);
+    } else {
+      await deactivateUser(payload.discordUserId);
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not remove user";
     return NextResponse.json({ error: message }, { status: 400 });

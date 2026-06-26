@@ -56,6 +56,14 @@ export type PredictionResult = PredictionDraft & {
   totalPoints: number;
 };
 
+export type KnockoutSubmission = {
+  discordUserId: string;
+  picks: Record<string, string>;
+  championTeamId: string;
+  lockAt?: string;
+  submittedAt: string;
+};
+
 export type LeaderboardEntry = {
   rank: number;
   discordUserId: string;
