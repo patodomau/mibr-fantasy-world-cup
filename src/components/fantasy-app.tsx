@@ -125,6 +125,7 @@ const copy = {
     knockoutSave: "Salvar chave mata-mata",
     knockoutSaving: "Salvando chave...",
     knockoutSaved: "Chave mata-mata salva",
+    knockoutClear: "Limpar palpites",
     knockoutPickHint: "Escolha quem avanca em cada confronto. Cada acerto vale 5 pontos.",
     knockoutReadOnlyHint: "Visualizacao da chave e resultados do mata-mata.",
     knockoutChampion: "Campeao",
@@ -218,6 +219,7 @@ const copy = {
     knockoutSave: "Save knockout bracket",
     knockoutSaving: "Saving bracket...",
     knockoutSaved: "Knockout bracket saved",
+    knockoutClear: "Clear picks",
     knockoutPickHint: "Choose who advances in every matchup. Each correct pick is worth 5 points.",
     knockoutReadOnlyHint: "Knockout bracket and results view.",
     knockoutChampion: "Champion",
@@ -1031,6 +1033,7 @@ function GamesPanel({
   knockoutSaved,
   knockoutSaving,
   locale,
+  onClearKnockoutDraft,
   onSaveKnockout,
   savedDrafts,
   saveErrors,
@@ -1046,6 +1049,7 @@ function GamesPanel({
   knockoutSaved: boolean;
   knockoutSaving: boolean;
   locale: Locale;
+  onClearKnockoutDraft: () => void;
   onSaveKnockout: (picks: Record<string, string>, championTeamId: string) => void;
   savedDrafts: Record<string, boolean>;
   saveErrors: Record<string, string | undefined>;
@@ -1214,6 +1218,7 @@ function GamesPanel({
           knockoutSaving={knockoutSaving}
           locale={locale}
           matches={matches}
+          onClearKnockoutDraft={onClearKnockoutDraft}
           onSaveKnockout={onSaveKnockout}
           readOnly={false}
           showTabs={false}
@@ -1426,6 +1431,7 @@ function BracketPanel({
   knockoutSaving,
   locale,
   matches,
+  onClearKnockoutDraft = () => undefined,
   onSaveKnockout,
   readOnly = true,
   showTabs = true,
@@ -1436,6 +1442,7 @@ function BracketPanel({
   knockoutSaving: boolean;
   locale: Locale;
   matches: Match[];
+  onClearKnockoutDraft?: () => void;
   onSaveKnockout: (picks: Record<string, string>, championTeamId: string) => void;
   readOnly?: boolean;
   showTabs?: boolean;
@@ -1463,6 +1470,7 @@ function BracketPanel({
     () => buildKnockoutDisplay(knockoutMatches, knockoutPicks),
     [knockoutMatches, knockoutPicks],
   );
+  const hasKnockoutPicks = Object.keys(knockoutPicks).length > 0;
   const [currentTime, setCurrentTime] = useState(() => Date.now());
   useEffect(() => {
     const interval = window.setInterval(() => setCurrentTime(Date.now()), 30000);
@@ -1488,6 +1496,7 @@ function BracketPanel({
     if (readOnly || knockoutLocked) {
       return;
     }
+    onClearKnockoutDraft();
     setKnockoutPicks((current) => {
       const next = { ...current, [matchId]: teamId };
       const display = buildKnockoutDisplay(knockoutMatches, next);
@@ -1506,6 +1515,13 @@ function BracketPanel({
 
       return next;
     });
+  };
+  const clearKnockoutPicks = () => {
+    if (readOnly || knockoutLocked) {
+      return;
+    }
+    setKnockoutPicks({});
+    onClearKnockoutDraft();
   };
 
   return (
@@ -1582,18 +1598,28 @@ function BracketPanel({
                   </div>
                 ) : null}
                 {!readOnly ? (
-                  <button
-                  className="border border-amber-400/45 bg-amber-500 px-4 py-2 text-sm font-black text-stone-950 transition hover:bg-amber-300 disabled:border-white/10 disabled:bg-white/10 disabled:text-stone-500"
-                  disabled={!completeKnockout || knockoutSaving || knockoutLocked}
-                  onClick={() => {
-                    if (championTeamId) {
-                      onSaveKnockout(knockoutPicks, championTeamId);
-                    }
-                  }}
-                  type="button"
-                >
-                  {knockoutSaving ? t.knockoutSaving : t.knockoutSave}
-                </button>
+                  <>
+                    <button
+                      className="border border-white/12 bg-white/5 px-4 py-2 text-sm font-black text-stone-200 transition hover:border-red-400/45 hover:bg-red-500/12 hover:text-red-100 disabled:border-white/10 disabled:bg-white/5 disabled:text-stone-600"
+                      disabled={!hasKnockoutPicks || knockoutSaving || knockoutLocked}
+                      onClick={clearKnockoutPicks}
+                      type="button"
+                    >
+                      {t.knockoutClear}
+                    </button>
+                    <button
+                      className="border border-amber-400/45 bg-amber-500 px-4 py-2 text-sm font-black text-stone-950 transition hover:bg-amber-300 disabled:border-white/10 disabled:bg-white/10 disabled:text-stone-500"
+                      disabled={!completeKnockout || knockoutSaving || knockoutLocked}
+                      onClick={() => {
+                        if (championTeamId) {
+                          onSaveKnockout(knockoutPicks, championTeamId);
+                        }
+                      }}
+                      type="button"
+                    >
+                      {knockoutSaving ? t.knockoutSaving : t.knockoutSave}
+                    </button>
+                  </>
                 ) : null}
               </div>
             </div>
@@ -2215,6 +2241,7 @@ export function FantasyApp({
               knockoutSaving={knockoutSaving}
               locale={locale}
               matches={matches}
+              onClearKnockoutDraft={() => setKnockoutSaved(false)}
               onSaveDraft={(draft) => void saveDraft(draft)}
               onSaveKnockout={(picks, championTeamId) => void saveKnockout(picks, championTeamId)}
               saveErrors={saveErrors}
