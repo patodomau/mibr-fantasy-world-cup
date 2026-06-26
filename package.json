@@ -19,7 +19,8 @@
     "db:refresh-discord-names": "node --dns-result-order=ipv4first --env-file=.env.local scripts/refresh-discord-display-labels.mjs",
     "db:backup-json": "node --dns-result-order=ipv4first --env-file=.env.local scripts/export-database-json.mjs",
     "db:migrate-match-ids": "node --dns-result-order=ipv4first --env-file=.env.local scripts/migrate-match-ids.mjs",
-    "aws:migrate-neon": "node --dns-result-order=ipv4first --env-file=.env.local scripts/migrate-neon-to-aws-api.mjs"
+    "aws:migrate-neon": "node --dns-result-order=ipv4first --env-file=.env.local scripts/migrate-neon-to-aws-api.mjs",
+    "aws:import-backup": "node --dns-result-order=ipv4first scripts/import-backup-to-aws-api.mjs"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
