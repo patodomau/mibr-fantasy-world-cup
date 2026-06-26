@@ -40,6 +40,8 @@ export type Match = {
   status: MatchStatus;
   homeScore?: number;
   awayScore?: number;
+  homePenaltyScore?: number;
+  awayPenaltyScore?: number;
   winner?: WinnerPick;
 };
 

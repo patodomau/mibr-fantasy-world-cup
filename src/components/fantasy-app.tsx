@@ -643,7 +643,12 @@ function formatPrediction(match: Match, draft: StoredPrediction | undefined, loc
 
 function formatActualScore(match: Match, locale: Locale) {
   if (Number.isInteger(match.homeScore) && Number.isInteger(match.awayScore)) {
-    return `${match.homeScore} x ${match.awayScore}`;
+    const baseScore = `${match.homeScore} x ${match.awayScore}`;
+    if (Number.isInteger(match.homePenaltyScore) && Number.isInteger(match.awayPenaltyScore)) {
+      return `${baseScore} (${match.homePenaltyScore} x ${match.awayPenaltyScore} pen.)`;
+    }
+
+    return baseScore;
   }
 
   return copy[locale].waitingResult;
@@ -1422,7 +1427,7 @@ function BracketPanel({
                           : "border-white/10 bg-white/5 text-sm text-stone-500",
                       ].join(" ")}
                     >
-                      {hasActualScore(match) ? `${match.homeScore} x ${match.awayScore}` : "- x -"}
+                      {hasActualScore(match) ? formatActualScore(match, locale) : "- x -"}
                     </div>
                     <div
                       className={[
@@ -1526,6 +1531,11 @@ function BracketPanel({
                           <div className="mt-2 text-[11px] font-semibold text-stone-500">
                             {formatDate(entry.match.kickoffAt, locale)}
                           </div>
+                          {hasActualScore(entry.match) ? (
+                            <div className="mt-1 text-[11px] font-black text-amber-200">
+                              {formatActualScore(entry.match, locale)}
+                            </div>
+                          ) : null}
                         </div>
                       </div>
                     );
