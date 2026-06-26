@@ -297,6 +297,23 @@ function formatDate(value: string, locale: Locale) {
   }).format(new Date(value));
 }
 
+function normalizeGroupName(value?: string) {
+  const match = value?.trim().match(/^GROUP[_\s-]?([A-L])$/i);
+  if (match) {
+    return `Group ${match[1].toUpperCase()}`;
+  }
+
+  return value?.trim();
+}
+
+function localizeGroupName(value: string, locale: Locale) {
+  return value.replace("Group", locale === "pt" ? "Grupo" : "Group");
+}
+
+function formatGroupName(value: string, locale: Locale) {
+  return localizeGroupName(normalizeGroupName(value) ?? value, locale);
+}
+
 function localizeValidationMessage(message: string | null, locale: Locale) {
   const t = copy[locale];
   if (message === "Choose a winner or draw first.") {
@@ -355,6 +372,68 @@ function TeamBlock({ side, selected }: { side: Match["homeTeam"]; selected: bool
         <div className="truncate text-xs text-stone-400">{side.shortName}</div>
       </div>
     </div>
+  );
+}
+
+function MatchResultTile({ locale, match }: { locale: Locale; match: Match }) {
+  return (
+    <article className="border border-white/12 bg-black/30 p-3">
+      <div className="mb-3 text-xs font-semibold text-stone-400">
+        {formatDate(match.kickoffAt, locale)} / {match.venue}
+      </div>
+      <div className="grid grid-cols-[minmax(0,1fr)_5.5rem_minmax(0,1fr)] items-center gap-3">
+        <div
+          className={[
+            "flex min-w-0 items-center gap-3 border px-2 py-2",
+            match.winner === "home"
+              ? "border-emerald-400/70 bg-emerald-500/16"
+              : match.winner === "draw"
+                ? "border-amber-400/60 bg-amber-500/12"
+                : "border-white/10 bg-white/5",
+          ].join(" ")}
+        >
+          <img
+            alt=""
+            className="h-9 w-12 shrink-0 border border-white/15 object-cover"
+            src={match.homeTeam.flagUrl}
+          />
+          <div className="min-w-0">
+            <div className="truncate text-sm font-black text-stone-100">{match.homeTeam.name}</div>
+            <div className="text-xs font-bold text-amber-200">{match.homeTeam.abbreviation}</div>
+          </div>
+        </div>
+        <div
+          className={[
+            "border px-2 py-2 text-center font-black",
+            hasActualScore(match)
+              ? "border-amber-500/35 bg-stone-950/80 text-sm text-amber-100"
+              : "border-white/10 bg-white/5 text-sm text-stone-500",
+          ].join(" ")}
+        >
+          {hasActualScore(match) ? formatActualScore(match, locale) : "- x -"}
+        </div>
+        <div
+          className={[
+            "flex min-w-0 items-center justify-end gap-3 border px-2 py-2 text-right",
+            match.winner === "away"
+              ? "border-emerald-400/70 bg-emerald-500/16"
+              : match.winner === "draw"
+                ? "border-amber-400/60 bg-amber-500/12"
+                : "border-white/10 bg-white/5",
+          ].join(" ")}
+        >
+          <div className="min-w-0">
+            <div className="truncate text-sm font-black text-stone-100">{match.awayTeam.name}</div>
+            <div className="text-xs font-bold text-amber-200">{match.awayTeam.abbreviation}</div>
+          </div>
+          <img
+            alt=""
+            className="h-9 w-12 shrink-0 border border-white/15 object-cover"
+            src={match.awayTeam.flagUrl}
+          />
+        </div>
+      </div>
+    </article>
   );
 }
 
@@ -764,7 +843,7 @@ function MatchCard({
           <div>
             <div className="text-xs font-bold uppercase tracking-[0.18em] text-amber-300">
               {STAGE_LABELS[match.stage][locale]}
-              {match.groupName ? ` / ${match.groupName}` : ""}
+              {match.groupName ? ` / ${formatGroupName(match.groupName, locale)}` : ""}
             </div>
             <h3 className="mt-1 text-base font-bold text-stone-100">
               {match.homeTeam.shortName} vs {match.awayTeam.shortName}
@@ -881,7 +960,7 @@ function ClosedMatchCard({
           <div>
             <div className="text-xs font-bold uppercase tracking-[0.18em] text-amber-300">
               {STAGE_LABELS[match.stage][locale]}
-              {match.groupName ? ` / ${match.groupName}` : ""}
+              {match.groupName ? ` / ${formatGroupName(match.groupName, locale)}` : ""}
             </div>
             <h3 className="mt-1 text-base font-bold text-stone-100">
               {match.homeTeam.shortName} vs {match.awayTeam.shortName}
@@ -1351,7 +1430,7 @@ function BracketPanel({
     new Set(
       matches
         .filter((match) => match.stage === "GROUP_STAGE")
-        .map((match) => match.groupName)
+        .map((match) => normalizeGroupName(match.groupName))
         .filter((groupName): groupName is string => Boolean(groupName)),
     ),
   ).sort((a, b) => a.localeCompare(b));
@@ -1359,7 +1438,7 @@ function BracketPanel({
     showTabs ? groupNames[0] ?? "knockout" : "knockout",
   );
   const activeGroupMatches = matches.filter(
-    (match) => match.stage === "GROUP_STAGE" && match.groupName === activeBracketTab,
+    (match) => match.stage === "GROUP_STAGE" && normalizeGroupName(match.groupName) === activeBracketTab,
   );
   const knockoutMatches = matches.filter((match) => match.stage !== "GROUP_STAGE");
   const [knockoutPicks, setKnockoutPicks] = useState<Record<string, string>>(
@@ -1435,7 +1514,7 @@ function BracketPanel({
               onClick={() => setActiveBracketTab(groupName)}
               type="button"
             >
-              {groupName.replace("Group", locale === "pt" ? "Grupo" : "Group")}
+              {localizeGroupName(groupName, locale)}
             </button>
           ))}
           <button
@@ -1457,75 +1536,11 @@ function BracketPanel({
         <section className="guild-frame bg-[var(--card)] p-4">
           <div className="relative z-10">
             <h2 className="mb-4 border-b border-amber-500/30 pb-2 text-sm font-black uppercase tracking-[0.16em] text-amber-100">
-              {t.groupTable}: {activeBracketTab.replace("Group", locale === "pt" ? "Grupo" : "Group")}
+              {t.groupTable}: {formatGroupName(activeBracketTab, locale)}
             </h2>
             <div className="grid gap-4 lg:grid-cols-2">
               {activeGroupMatches.map((match) => (
-                <article className="border border-white/12 bg-black/30 p-3" key={match.id}>
-                  <div className="mb-3 text-xs font-semibold text-stone-400">
-                    {formatDate(match.kickoffAt, locale)} / {match.venue}
-                  </div>
-                  <div className="grid grid-cols-[minmax(0,1fr)_4.75rem_minmax(0,1fr)] items-center gap-3">
-                    <div
-                      className={[
-                        "flex min-w-0 items-center gap-3 border px-2 py-2",
-                        match.winner === "home"
-                          ? "border-emerald-400/70 bg-emerald-500/16"
-                          : match.winner === "draw"
-                            ? "border-amber-400/60 bg-amber-500/12"
-                            : "border-white/10 bg-white/5",
-                      ].join(" ")}
-                    >
-                      <img
-                        alt=""
-                        className="h-9 w-12 shrink-0 border border-white/15 object-cover"
-                        src={match.homeTeam.flagUrl}
-                      />
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-black text-stone-100">
-                          {match.homeTeam.name}
-                        </div>
-                        <div className="text-xs font-bold text-amber-200">
-                          {match.homeTeam.abbreviation}
-                        </div>
-                      </div>
-                    </div>
-                    <div
-                      className={[
-                        "border px-2 py-2 text-center font-black",
-                        hasActualScore(match)
-                          ? "border-amber-500/35 bg-stone-950/80 text-lg text-amber-100"
-                          : "border-white/10 bg-white/5 text-sm text-stone-500",
-                      ].join(" ")}
-                    >
-                      {hasActualScore(match) ? formatActualScore(match, locale) : "- x -"}
-                    </div>
-                    <div
-                      className={[
-                        "flex min-w-0 items-center justify-end gap-3 border px-2 py-2 text-right",
-                        match.winner === "away"
-                          ? "border-emerald-400/70 bg-emerald-500/16"
-                          : match.winner === "draw"
-                            ? "border-amber-400/60 bg-amber-500/12"
-                            : "border-white/10 bg-white/5",
-                      ].join(" ")}
-                    >
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-black text-stone-100">
-                          {match.awayTeam.name}
-                        </div>
-                        <div className="text-xs font-bold text-amber-200">
-                          {match.awayTeam.abbreviation}
-                        </div>
-                      </div>
-                      <img
-                        alt=""
-                        className="h-9 w-12 shrink-0 border border-white/15 object-cover"
-                        src={match.awayTeam.flagUrl}
-                      />
-                    </div>
-                  </div>
-                </article>
+                <MatchResultTile key={match.id} locale={locale} match={match} />
               ))}
             </div>
           </div>
@@ -1588,9 +1603,24 @@ function BracketPanel({
               <h2 className="mb-4 border-b border-amber-500/30 pb-2 text-sm font-black uppercase tracking-[0.16em] text-amber-100">
                 {STAGE_LABELS[stage][locale]}
               </h2>
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <div className={readOnly ? "grid gap-4 lg:grid-cols-2" : "grid gap-4 md:grid-cols-2 xl:grid-cols-4"}>
                 {stageMatches.length > 0 ? (
                   stageMatches.map((entry) => {
+                    if (readOnly) {
+                      return (
+                        <div key={entry.match.id}>
+                          <MatchResultTile
+                            locale={locale}
+                            match={{
+                              ...entry.match,
+                              homeTeam: entry.homeTeam,
+                              awayTeam: entry.awayTeam,
+                            }}
+                          />
+                        </div>
+                      );
+                    }
+
                     return (
                       <div className="relative min-h-24" key={entry.match.id}>
                         <div className="absolute -bottom-2 left-1/2 h-4 w-px bg-white/15" />
