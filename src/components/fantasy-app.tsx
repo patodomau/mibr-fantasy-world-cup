@@ -697,6 +697,20 @@ function hasResolvedTeams(match: Match) {
   return !isPendingTeam(match.homeTeam) && !isPendingTeam(match.awayTeam);
 }
 
+function getPreferredOpenStageFilter(matches: Match[]): StageFilter {
+  if (matches.some((match) => match.stage === "GROUP_STAGE" && hasResolvedTeams(match) && isOpenForPicks(match))) {
+    return "GROUP_STAGE";
+  }
+
+  return (
+    stageOrder.find(
+      (stage) =>
+        isKnockoutStage(stage) &&
+        matches.some((match) => match.stage === stage && hasResolvedTeams(match) && isOpenForPicks(match)),
+    ) ?? "all"
+  );
+}
+
 function hasPoints(draft?: StoredPrediction): draft is PredictionResult {
   return Boolean(draft && "totalPoints" in draft);
 }
@@ -1042,11 +1056,8 @@ function GamesPanel({
 }) {
   const [gamesTab, setGamesTab] = useState<GamesTab>("open");
   const [dateSort, setDateSort] = useState<DateSort>("asc");
-  const [stageFilter, setStageFilter] = useState<StageFilter>(() =>
-    matches.some((match) => isKnockoutStage(match.stage) && hasResolvedTeams(match) && isMatchPickable(match))
-      ? "ROUND_OF_32"
-      : "all",
-  );
+  const preferredOpenStageFilter = useMemo(() => getPreferredOpenStageFilter(matches), [matches]);
+  const [stageFilter, setStageFilter] = useState<StageFilter>(() => getPreferredOpenStageFilter(matches));
   const [firstTeamFilter, setFirstTeamFilter] = useState("all");
   const [secondTeamFilter, setSecondTeamFilter] = useState("all");
   const [openTimeRangeOnly, setOpenTimeRangeOnly] = useState(false);
@@ -1069,7 +1080,11 @@ function GamesPanel({
   );
   const teamOptions = useMemo(() => getTeamOptions(baseMatches), [baseMatches]);
   const activeStageFilter =
-    stageFilter === "all" || stageOptions.includes(stageFilter) ? stageFilter : "all";
+    stageFilter === "all" || stageOptions.includes(stageFilter)
+      ? stageFilter
+      : gamesTab === "open"
+        ? preferredOpenStageFilter
+        : "all";
   const activeFirstTeamFilter =
     firstTeamFilter === "all" || teamOptions.some((team) => team.id === firstTeamFilter)
       ? firstTeamFilter

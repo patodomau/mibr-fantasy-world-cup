@@ -7,6 +7,57 @@ const tableName = process.env.MIBR_DYNAMODB_TABLE ?? "ddb-mibr-fantasy-api-dynam
 const profile = process.env.AWS_PROFILE ?? "bootstrap-admin";
 const apply = process.argv.includes("--apply");
 
+const teamFlagCodes = {
+  ALG: "dz",
+  ARG: "ar",
+  AUS: "au",
+  AUT: "at",
+  BEL: "be",
+  BIH: "ba",
+  BRA: "br",
+  CAN: "ca",
+  CIV: "ci",
+  COD: "cd",
+  COL: "co",
+  CPV: "cv",
+  CRO: "hr",
+  CUW: "cw",
+  CZE: "cz",
+  ECU: "ec",
+  EGY: "eg",
+  ENG: "gb-eng",
+  ESP: "es",
+  FRA: "fr",
+  GER: "de",
+  GHA: "gh",
+  HAI: "ht",
+  IRN: "ir",
+  IRQ: "iq",
+  JOR: "jo",
+  JPN: "jp",
+  KOR: "kr",
+  KSA: "sa",
+  MAR: "ma",
+  MEX: "mx",
+  NED: "nl",
+  NOR: "no",
+  NZL: "nz",
+  PAN: "pa",
+  PAR: "py",
+  POR: "pt",
+  QAT: "qa",
+  RSA: "za",
+  SCO: "gb-sct",
+  SEN: "sn",
+  SUI: "ch",
+  SWE: "se",
+  TUN: "tn",
+  TUR: "tr",
+  URU: "uy",
+  USA: "us",
+  UZB: "uz",
+};
+
 function aws(args, input) {
   return execFileSync("aws", [...args, "--profile", profile, "--output", "json"], {
     encoding: "utf8",
@@ -77,6 +128,10 @@ function deterministicRank(groupName, team) {
   return hash;
 }
 
+function flagUrl(code) {
+  return `https://flagcdn.com/w160/${code}.png`;
+}
+
 function rankGroup(groupName, matches) {
   const rows = new Map();
   for (const match of matches) {
@@ -139,7 +194,7 @@ function placeholderTeam(label, abbreviation) {
     name: clean,
     shortName: clean,
     abbreviation,
-    flagUrl: "https://flagcdn.com/w160/un.png",
+    flagUrl: flagUrl("un"),
   };
 }
 
@@ -167,6 +222,30 @@ function isPendingTeam(team) {
     marker.includes("finalist") ||
     marker.includes("slot-")
   );
+}
+
+function normalizeTeamFlag(team) {
+  if (isPendingTeam(team)) {
+    return team;
+  }
+
+  const flagCode = teamFlagCodes[String(team.abbreviation ?? "").toUpperCase()];
+  if (!flagCode) {
+    return team;
+  }
+
+  return {
+    ...team,
+    flagUrl: flagUrl(flagCode),
+  };
+}
+
+function normalizeMatchTeamFlags(match) {
+  return {
+    ...match,
+    homeTeam: normalizeTeamFlag(match.homeTeam),
+    awayTeam: normalizeTeamFlag(match.awayTeam),
+  };
 }
 
 function matchTeamKeyPart(team) {
@@ -220,7 +299,9 @@ function batchWrite(requests) {
 
 const items = queryPartition("MATCHES#2026");
 const existingMatches = items.map((item) => ddbToJs(item.data));
-const groupMatches = existingMatches.filter((match) => match.stage === "GROUP_STAGE");
+const groupMatches = existingMatches
+  .filter((match) => match.stage === "GROUP_STAGE")
+  .map(normalizeMatchTeamFlags);
 const existingKnockoutItems = items.filter((item) => {
   const data = ddbToJs(item.data);
   return data.stage !== "GROUP_STAGE";
