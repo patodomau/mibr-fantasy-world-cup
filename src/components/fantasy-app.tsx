@@ -1438,21 +1438,21 @@ function GamesPanel({
 function FlagMark({ locale }: { locale: Locale }) {
   if (locale === "pt") {
     return (
-      <span className="relative block h-5 w-7 overflow-hidden border border-white/25 bg-emerald-600">
-        <span className="absolute left-1/2 top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rotate-45 bg-yellow-300" />
-        <span className="absolute left-1/2 top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 bg-blue-700" />
+      <span className="relative block h-6 w-8 overflow-hidden rounded-sm border border-white/30 bg-emerald-600 shadow-sm shadow-black/30">
+        <span className="absolute left-1/2 top-1/2 h-[1.125rem] w-[1.125rem] -translate-x-1/2 -translate-y-1/2 rotate-45 bg-yellow-300" />
+        <span className="absolute left-1/2 top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-blue-700" />
       </span>
     );
   }
 
   return (
     <span
-      className="relative block h-5 w-7 overflow-hidden border border-white/25 bg-red-600"
+      className="relative block h-6 w-8 overflow-hidden rounded-sm border border-white/30 bg-red-600 shadow-sm shadow-black/30"
       style={{
         backgroundImage: "repeating-linear-gradient(to bottom, #dc2626 0 2px, #f8fafc 2px 4px)",
       }}
     >
-      <span className="absolute left-0 top-0 h-3 w-3.5 bg-blue-800" />
+      <span className="absolute left-0 top-0 h-3.5 w-4 bg-blue-800" />
     </span>
   );
 }
@@ -1472,7 +1472,7 @@ function LocaleToggle({
     <button
       aria-label={isPt ? "Switch language to English" : "Trocar idioma para portugues"}
       className={[
-        "relative h-11 w-32 shrink-0 overflow-hidden border border-white/15 bg-black/40 p-1 text-[0.65rem] font-black transition hover:border-amber-400/60",
+        "relative h-11 w-24 shrink-0 overflow-hidden rounded-full border border-amber-500/25 bg-stone-950/80 p-1 transition hover:border-amber-400/70",
         className,
       ].join(" ")}
       onClick={() => onLocaleChange(isPt ? "en" : "pt")}
@@ -1481,28 +1481,26 @@ function LocaleToggle({
     >
       <span
         className={[
-          "absolute left-1 top-1 h-9 w-[3.75rem] bg-amber-500 shadow-lg shadow-amber-950/40 transition-transform duration-200",
-          isPt ? "translate-x-0" : "translate-x-[3.75rem]",
+          "absolute left-1 top-1 h-9 w-9 rounded-full border border-amber-300/70 bg-amber-500/95 shadow-lg shadow-amber-950/50 transition-transform duration-200",
+          isPt ? "translate-x-0" : "translate-x-[3.25rem]",
         ].join(" ")}
       />
-      <span className="relative z-10 flex h-full items-center justify-between">
+      <span className="relative z-10 flex h-full items-center justify-between px-1">
         <span
           className={[
-            "flex h-9 w-[3.75rem] items-center justify-center gap-1.5 transition",
-            isPt ? "text-stone-950" : "text-stone-300",
+            "flex h-9 w-9 items-center justify-center rounded-full transition",
+            isPt ? "opacity-100" : "opacity-60 grayscale",
           ].join(" ")}
         >
           <FlagMark locale="pt" />
-          <span>BRA</span>
         </span>
         <span
           className={[
-            "flex h-9 w-[3.75rem] items-center justify-center gap-1.5 transition",
-            isPt ? "text-stone-300" : "text-stone-950",
+            "flex h-9 w-9 items-center justify-center rounded-full transition",
+            isPt ? "opacity-60 grayscale" : "opacity-100",
           ].join(" ")}
         >
           <FlagMark locale="en" />
-          <span>USA</span>
         </span>
       </span>
     </button>
