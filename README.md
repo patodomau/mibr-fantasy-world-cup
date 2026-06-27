@@ -7,8 +7,8 @@ The app is built for:
 - Discord login through `next-auth`
 - allowlist access by Discord user ID
 - Discord avatar capture for ranking/admin identification
-- Neon Postgres persistence under `mibr_fantasy_world_cup.*`
-- Vercel deployment and cron routes
+- AWS API/DynamoDB persistence for production
+- Vercel deployment
 - fixture/status sync through ESPN Scoreboard
 
 ## Current MVP
@@ -32,7 +32,7 @@ The app is built for:
 
 Runtime fixture, status, and score updates use the public ESPN Scoreboard endpoint for `fifa.world`.
 
-Vercel Hobby accounts only support daily cron jobs, so this app uses one daily sync. The cron route runs once per day in UTC and refreshes the surrounding date range.
+Production live score updates are handled by the AWS EventBridge/Lambda sync path and written to DynamoDB through the signed AWS API. Vercel cron is intentionally disabled.
 
 ## Setup
 
@@ -60,12 +60,13 @@ For production:
 
 ```env
 MOCK_AUTH=false
-DATABASE_URL=postgresql://USER:PASSWORD@HOST/DATABASE?sslmode=require
 NEXTAUTH_URL=https://mibr-fantasy-world-cup.vercel.app
 NEXTAUTH_SECRET=replace-with-a-long-random-secret
 DISCORD_CLIENT_ID=replace-with-discord-client-id
 DISCORD_CLIENT_SECRET=replace-with-discord-client-secret
-CRON_SECRET=replace-with-random-cron-secret
+MIBR_AWS_API_BASE_URL=https://replace-with-api-id.execute-api.us-east-1.amazonaws.com
+MIBR_AWS_API_KEY_ID=replace-with-key-id
+MIBR_AWS_API_SECRET=replace-with-hmac-secret
 ```
 
 Apply DB schema:
@@ -74,7 +75,7 @@ Apply DB schema:
 npm run db:schema
 ```
 
-Trigger the same production sync route manually, outside the Vercel cron:
+Legacy Neon schema and manual Vercel sync scripts remain for local recovery/debug workflows only:
 
 ```bash
 npm run sync:manual
@@ -86,9 +87,7 @@ For a live/finished status refresh:
 npm run sync:manual:live
 ```
 
-The manual script reads `.env.local`, uses `NEXTAUTH_URL` or `MIBR_SYNC_URL` as
-the target URL, and sends `CRON_SECRET` as the bearer token when it exists.
-Vercel cron stays active independently.
+Do not use these legacy sync scripts for production score updates. Production uses the AWS sync Lambda.
 
 Run locally:
 

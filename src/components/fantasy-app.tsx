@@ -1,6 +1,6 @@
 "use client";
 
-import { Brackets, Check, ChevronDown, Gamepad2, RefreshCw, Settings, Trophy } from "lucide-react";
+import { Brackets, Check, ChevronDown, Gamepad2, RefreshCw, Settings, Trophy, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -132,6 +132,13 @@ const copy = {
     knockoutIncomplete: "Complete a chave ate a final antes de salvar.",
     knockoutLock: "A chave trava 5 minutos antes do primeiro jogo do mata-mata.",
     knockout: "Mata-mata",
+    knockoutNoticeTitle: "Atualizacao do mata-mata",
+    knockoutNoticeBody:
+      "A fase de mata-mata agora funciona por chave completa. Antes do inicio da primeira partida, voce precisa preencher e enviar toda a chave. Cada partida vale 5 pontos e nao e necessario escolher placar, apenas o vencedor.",
+    knockoutNoticeFilter: "Se nao encontrar a chave, selecione Mata-Mata no filtro.",
+    knockoutNoticeContact: "Qualquer duvida, entrar em contato com patodomau no Discord.",
+    knockoutNoticeDismiss: "Nao mostrar novamente",
+    knockoutNoticeClose: "Fechar aviso",
     groupTable: "Jogos do grupo",
     rankingPlayer: "Jogador",
     errorChoose: "Escolha vencedor ou empate primeiro.",
@@ -226,6 +233,13 @@ const copy = {
     knockoutIncomplete: "Complete the bracket through the final before saving.",
     knockoutLock: "The bracket locks 5 minutes before the first knockout match.",
     knockout: "Knockout",
+    knockoutNoticeTitle: "Knockout stage update",
+    knockoutNoticeBody:
+      "The knockout stage now works as a full bracket submission. Before the first knockout match starts, you need to fill and submit the entire bracket. Each match is worth 5 points and you do not need to pick a score, only the winner.",
+    knockoutNoticeFilter: "If you do not see the bracket, select Knockout in the filter.",
+    knockoutNoticeContact: "If you have any questions, contact patodomau on Discord.",
+    knockoutNoticeDismiss: "Do not show again",
+    knockoutNoticeClose: "Close notice",
     groupTable: "Group games",
     rankingPlayer: "Player",
     errorChoose: "Choose a winner or draw first.",
@@ -256,6 +270,8 @@ const localeSounds: Record<Locale, string> = {
   en: "/sounds/blam-this-is-america.mp3",
   pt: "/sounds/ai-que-delicia-mickey.mp3",
 };
+
+const knockoutNoticeStorageKey = "mibr-knockout-notice-dismissed-2026-06-27";
 
 function paymentTone(paidEntry: boolean) {
   return paidEntry
@@ -727,6 +743,15 @@ function isKnockoutBracketOpen(matches: Match[], now = new Date()) {
   return Boolean(lockAt && now.getTime() < new Date(lockAt).getTime());
 }
 
+function getFirstKnockoutKickoffTime(matches: Match[]) {
+  const kickoffTimes = matches
+    .filter((match) => isKnockoutStage(match.stage))
+    .map((match) => new Date(match.kickoffAt).getTime())
+    .filter((time) => Number.isFinite(time));
+
+  return kickoffTimes.length > 0 ? Math.min(...kickoffTimes) : undefined;
+}
+
 function isOpenInGamesTab(match: Match, matches: Match[]) {
   if (isKnockoutStage(match.stage)) {
     return hasResolvedTeams(match) && isKnockoutBracketOpen(matches);
@@ -1117,8 +1142,39 @@ function GamesPanel({
   const [secondTeamFilter, setSecondTeamFilter] = useState("all");
   const [openTimeRangeOnly, setOpenTimeRangeOnly] = useState(false);
   const [closedTimeRangeOnly, setClosedTimeRangeOnly] = useState(false);
+  const [currentTime, setCurrentTime] = useState(() => Date.now());
+  const [knockoutNoticeReady, setKnockoutNoticeReady] = useState(false);
+  const [knockoutNoticeHidden, setKnockoutNoticeHidden] = useState(false);
+  const [knockoutNoticePrevented, setKnockoutNoticePrevented] = useState(false);
   const t = copy[locale];
+  const firstKnockoutKickoffTime = useMemo(() => getFirstKnockoutKickoffTime(matches), [matches]);
+  const showKnockoutNotice =
+    knockoutNoticeReady &&
+    !knockoutNoticeHidden &&
+    !knockoutNoticePrevented &&
+    Boolean(firstKnockoutKickoffTime && currentTime < firstKnockoutKickoffTime);
   const timeRangeOnly = gamesTab === "open" ? openTimeRangeOnly : closedTimeRangeOnly;
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setKnockoutNoticePrevented(window.localStorage.getItem(knockoutNoticeStorageKey) === "true");
+      setKnockoutNoticeReady(true);
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, []);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setCurrentTime(Date.now()), 30000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  const preventKnockoutNotice = () => {
+    window.localStorage.setItem(knockoutNoticeStorageKey, "true");
+    setKnockoutNoticePrevented(true);
+    setKnockoutNoticeHidden(true);
+  };
+
   const baseMatches = useMemo(
     () =>
       matches.filter(
@@ -1185,6 +1241,57 @@ function GamesPanel({
 
   return (
     <div className="space-y-6">
+      {showKnockoutNotice ? (
+        <div
+          aria-labelledby="knockout-notice-title"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/76 px-4 py-6 backdrop-blur-sm"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setKnockoutNoticeHidden(true);
+            }
+          }}
+          role="dialog"
+        >
+          <div className="relative w-full max-w-lg border border-amber-400/35 bg-stone-950 p-5 shadow-2xl shadow-black/60">
+            <button
+              aria-label={t.knockoutNoticeClose}
+              className="absolute right-3 top-3 flex h-9 w-9 items-center justify-center border border-white/10 bg-white/5 text-stone-300 transition hover:border-amber-400/60 hover:text-amber-100"
+              onClick={() => setKnockoutNoticeHidden(true)}
+              type="button"
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
+            </button>
+            <div className="pr-10">
+              <h2 className="text-xl font-black text-amber-100" id="knockout-notice-title">
+                {t.knockoutNoticeTitle}
+              </h2>
+              <div className="mt-4 space-y-3 text-sm font-semibold leading-6 text-stone-200">
+                <p>{t.knockoutNoticeBody}</p>
+                <p>{t.knockoutNoticeFilter}</p>
+                <p className="text-amber-200">{t.knockoutNoticeContact}</p>
+              </div>
+            </div>
+            <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button
+                className="border border-white/15 bg-white/5 px-4 py-2 text-sm font-bold text-stone-200 transition hover:border-amber-400/50 hover:text-amber-100"
+                onClick={preventKnockoutNotice}
+                type="button"
+              >
+                {t.knockoutNoticeDismiss}
+              </button>
+              <button
+                className="border border-amber-400 bg-amber-500 px-4 py-2 text-sm font-black text-stone-950 transition hover:bg-amber-400"
+                onClick={() => setKnockoutNoticeHidden(true)}
+                type="button"
+              >
+                {t.knockoutNoticeClose}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <div className="flex flex-wrap gap-2">
         {(["open", "closed"] satisfies GamesTab[]).map((item) => (
           <button
