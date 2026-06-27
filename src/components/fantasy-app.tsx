@@ -403,22 +403,25 @@ function MatchResultTile({
   draft,
   locale,
   match,
+  predictionSummary,
 }: {
   draft?: StoredPrediction;
   locale: Locale;
   match: Match;
+  predictionSummary?: string;
 }) {
   const t = copy[locale];
   const points = getPredictionPoints(draft);
-  const predictionSummary = draft?.predictedWinner
+  const draftSummary = draft?.predictedWinner
     ? `${t.yourPick}: ${formatPrediction(match, draft, locale)} - ${points.totalPoints} ${t.pointsShort}`
     : undefined;
+  const summary = predictionSummary ?? draftSummary;
 
   return (
     <article className="border border-white/12 bg-black/30 p-3">
       <div className="mb-3 text-xs font-semibold text-stone-400">
         {formatDate(match.kickoffAt, locale)} / {match.venue}
-        {predictionSummary ? ` - ${predictionSummary}` : ""}
+        {summary ? ` - ${summary}` : ""}
       </div>
       <div className="grid grid-cols-[minmax(0,1fr)_5.5rem_minmax(0,1fr)] items-center gap-3">
         <div
@@ -1414,6 +1417,25 @@ function getMatchWinnerTeamId(match: Match, homeTeam = match.homeTeam, awayTeam 
   return undefined;
 }
 
+function formatKnockoutPickSummary(
+  entry: KnockoutDisplayMatch,
+  submission: KnockoutSubmission | undefined,
+  teamById: Map<string, Match["homeTeam"]>,
+  locale: Locale,
+) {
+  const pickedTeamId = submission?.picks?.[entry.match.id];
+  if (!pickedTeamId) {
+    return undefined;
+  }
+
+  const pickedTeam = teamById.get(pickedTeamId);
+  const pickedLabel = pickedTeam?.shortName ?? pickedTeam?.name ?? pickedTeam?.abbreviation ?? pickedTeamId;
+  const actualWinnerTeamId = getMatchWinnerTeamId(entry.match, entry.homeTeam, entry.awayTeam);
+  const points = actualWinnerTeamId === pickedTeamId ? 5 : 0;
+
+  return `${copy[locale].yourPick}: ${pickedLabel} - ${points} ${copy[locale].pointsShort}`;
+}
+
 function compareKickoffThenId(left: Match, right: Match) {
   return new Date(left.kickoffAt).getTime() - new Date(right.kickoffAt).getTime() || left.id.localeCompare(right.id);
 }
@@ -1539,6 +1561,18 @@ function BracketPanel({
     () => buildKnockoutDisplay(knockoutMatches, knockoutPicks, readOnly),
     [knockoutMatches, knockoutPicks, readOnly],
   );
+  const teamById = useMemo(() => {
+    const teams = new Map<string, Match["homeTeam"]>();
+    for (const match of matches) {
+      teams.set(match.homeTeam.id, match.homeTeam);
+      teams.set(match.awayTeam.id, match.awayTeam);
+    }
+    for (const entry of knockoutDisplay) {
+      teams.set(entry.homeTeam.id, entry.homeTeam);
+      teams.set(entry.awayTeam.id, entry.awayTeam);
+    }
+    return teams;
+  }, [knockoutDisplay, matches]);
   const hasKnockoutPicks = Object.keys(knockoutPicks).length > 0;
   const [currentTime, setCurrentTime] = useState(() => Date.now());
   useEffect(() => {
@@ -1727,6 +1761,12 @@ function BracketPanel({
                               homeTeam: entry.homeTeam,
                               awayTeam: entry.awayTeam,
                             }}
+                            predictionSummary={formatKnockoutPickSummary(
+                              entry,
+                              initialKnockoutSubmission,
+                              teamById,
+                              locale,
+                            )}
                           />
                         </div>
                       );
