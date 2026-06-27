@@ -1474,7 +1474,7 @@ function LocaleToggle({
       aria-checked={!isPt}
       role="switch"
       className={[
-        "group relative h-8 w-[4.75rem] shrink-0 overflow-hidden rounded-full border border-amber-500/25 bg-stone-950/75 shadow-inner shadow-black/50 transition-colors duration-300 hover:border-amber-400/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-300",
+        "relative flex h-8 w-[4.75rem] shrink-0 items-center justify-between rounded-lg border border-amber-500/25 bg-stone-950/75 px-1.5 shadow-inner shadow-black/50 transition-colors duration-300 hover:border-amber-400/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-300",
         className,
       ].join(" ")}
       onClick={() => onLocaleChange(isPt ? "en" : "pt")}
@@ -1483,27 +1483,19 @@ function LocaleToggle({
     >
       <span
         className={[
-          "absolute left-1 top-1 h-6 w-8 rounded-full border border-amber-300/60 bg-amber-500/80 shadow-lg shadow-amber-950/50 transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] group-active:scale-95",
-          isPt ? "translate-x-0" : "translate-x-9",
+          "flex h-6 w-8 items-center justify-center rounded-md transition duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
+          isPt ? "scale-100 opacity-100 shadow-sm shadow-amber-500/20" : "scale-95 opacity-40 grayscale",
         ].join(" ")}
-      />
-      <span className="relative z-10 flex h-full items-center justify-between px-1.5">
-        <span
-          className={[
-            "flex h-6 w-8 items-center justify-center transition duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
-            isPt ? "scale-100 opacity-100" : "scale-95 opacity-45 grayscale",
-          ].join(" ")}
-        >
-          <FlagMark locale="pt" />
-        </span>
-        <span
-          className={[
-            "flex h-6 w-8 items-center justify-center transition duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
-            isPt ? "scale-95 opacity-45 grayscale" : "scale-100 opacity-100",
-          ].join(" ")}
-        >
-          <FlagMark locale="en" />
-        </span>
+      >
+        <FlagMark locale="pt" />
+      </span>
+      <span
+        className={[
+          "flex h-6 w-8 items-center justify-center rounded-md transition duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
+          isPt ? "scale-95 opacity-40 grayscale" : "scale-100 opacity-100 shadow-sm shadow-amber-500/20",
+        ].join(" ")}
+      >
+        <FlagMark locale="en" />
       </span>
     </button>
   );
