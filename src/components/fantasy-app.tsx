@@ -25,7 +25,7 @@ type Locale = "pt" | "en";
 type Panel = "games" | "ranking" | "bracket" | "admin";
 type GamesTab = "open" | "closed";
 type DateSort = "asc" | "desc";
-type StageFilter = Stage | "all";
+type StageFilter = Stage | "knockout" | "all";
 type StoredPrediction = PredictionDraft | PredictionResult;
 
 type Props = {
@@ -377,11 +377,48 @@ function TeamBlock({ side, selected }: { side: Match["homeTeam"]; selected: bool
   );
 }
 
-function MatchResultTile({ locale, match }: { locale: Locale; match: Match }) {
+function getStageFilterLabel(stage: StageFilter, locale: Locale) {
+  if (stage === "all") {
+    return copy[locale].allStages;
+  }
+  if (stage === "knockout") {
+    return copy[locale].knockout;
+  }
+
+  return STAGE_LABELS[stage][locale];
+}
+
+function matchPassesStageFilter(match: Match, stageFilter: StageFilter) {
+  if (stageFilter === "all") {
+    return true;
+  }
+  if (stageFilter === "knockout") {
+    return isKnockoutStage(match.stage);
+  }
+
+  return match.stage === stageFilter;
+}
+
+function MatchResultTile({
+  draft,
+  locale,
+  match,
+}: {
+  draft?: StoredPrediction;
+  locale: Locale;
+  match: Match;
+}) {
+  const t = copy[locale];
+  const points = getPredictionPoints(draft);
+  const predictionSummary = draft?.predictedWinner
+    ? `${t.yourPick}: ${formatPrediction(match, draft, locale)} - ${points.totalPoints} ${t.pointsShort}`
+    : undefined;
+
   return (
     <article className="border border-white/12 bg-black/30 p-3">
       <div className="mb-3 text-xs font-semibold text-stone-400">
         {formatDate(match.kickoffAt, locale)} / {match.venue}
+        {predictionSummary ? ` - ${predictionSummary}` : ""}
       </div>
       <div className="grid grid-cols-[minmax(0,1fr)_5.5rem_minmax(0,1fr)] items-center gap-3">
         <div
@@ -600,13 +637,13 @@ function StageFilterDropdown({
   label: string;
   locale: Locale;
   onChange: (stage: StageFilter) => void;
-  options: Stage[];
+  options: StageFilter[];
   selectedStage: StageFilter;
 }) {
   const [open, setOpen] = useState(false);
   const [menuRect, setMenuRect] = useState<{ left: number; top: number; width: number } | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const selectedLabel = selectedStage === "all" ? allLabel : STAGE_LABELS[selectedStage][locale];
+  const selectedLabel = getStageFilterLabel(selectedStage, locale);
 
   const toggleOpen = () => {
     const rect = triggerRef.current?.getBoundingClientRect();
@@ -667,7 +704,7 @@ function StageFilterDropdown({
                 }}
                 type="button"
               >
-                <span className="min-w-0 flex-1 truncate">{STAGE_LABELS[stage][locale]}</span>
+                <span className="min-w-0 flex-1 truncate">{getStageFilterLabel(stage, locale)}</span>
                 {stage === selectedStage ? <Check className="h-4 w-4 text-emerald-300" aria-hidden="true" /> : null}
               </button>
             ))}
@@ -721,13 +758,7 @@ function getPreferredOpenStageFilter(matches: Match[]): StageFilter {
     return "all";
   }
 
-  return (
-    stageOrder.find(
-      (stage) =>
-        isKnockoutStage(stage) &&
-        matches.some((match) => match.stage === stage && hasResolvedTeams(match)),
-    ) ?? "all"
-  );
+  return matches.some((match) => isKnockoutStage(match.stage) && hasResolvedTeams(match)) ? "knockout" : "all";
 }
 
 function hasPoints(draft?: StoredPrediction): draft is PredictionResult {
@@ -1095,8 +1126,16 @@ function GamesPanel({
     [gamesTab, matches],
   );
   const stageOptions = useMemo(
-    () =>
-      stageOrder.filter((stage) => baseMatches.some((match) => match.stage === stage)),
+    () => {
+      const options: StageFilter[] = [];
+      if (baseMatches.some((match) => match.stage === "GROUP_STAGE")) {
+        options.push("GROUP_STAGE");
+      }
+      if (baseMatches.some((match) => isKnockoutStage(match.stage))) {
+        options.push("knockout");
+      }
+      return options;
+    },
     [baseMatches],
   );
   const teamOptions = useMemo(() => getTeamOptions(baseMatches), [baseMatches]);
@@ -1120,7 +1159,7 @@ function GamesPanel({
         (match) => {
           const matchTeamIds = new Set([match.homeTeam.id, match.awayTeam.id]);
           return (
-            (activeStageFilter === "all" || match.stage === activeStageFilter) &&
+            matchPassesStageFilter(match, activeStageFilter) &&
             (activeFirstTeamFilter === "all" || matchTeamIds.has(activeFirstTeamFilter)) &&
             (activeSecondTeamFilter === "all" || matchTeamIds.has(activeSecondTeamFilter)) &&
             (!timeRangeOnly || isWithinTabTimeRange(match, gamesTab))
@@ -1139,7 +1178,7 @@ function GamesPanel({
         : t.noClosedGames
       : t.noFilteredGames;
   const showingKnockoutPicker =
-    gamesTab === "open" && activeStageFilter !== "all" && isKnockoutStage(activeStageFilter);
+    gamesTab === "open" && activeStageFilter === "knockout";
 
   return (
     <div className="space-y-6">
@@ -1364,11 +1403,22 @@ type KnockoutDisplayMatch = {
   selectable: boolean;
 };
 
+function getMatchWinnerTeamId(match: Match, homeTeam = match.homeTeam, awayTeam = match.awayTeam) {
+  if (match.winner === "home") {
+    return homeTeam.id;
+  }
+  if (match.winner === "away") {
+    return awayTeam.id;
+  }
+
+  return undefined;
+}
+
 function compareKickoffThenId(left: Match, right: Match) {
   return new Date(left.kickoffAt).getTime() - new Date(right.kickoffAt).getTime() || left.id.localeCompare(right.id);
 }
 
-function buildKnockoutDisplay(matches: Match[], picks: Record<string, string>) {
+function buildKnockoutDisplay(matches: Match[], picks: Record<string, string>, useActualWinners = false) {
   const displayMatches: KnockoutDisplayMatch[] = [];
   let previousWinners: Match["homeTeam"][] = [];
 
@@ -1383,7 +1433,7 @@ function buildKnockoutDisplay(matches: Match[], picks: Record<string, string>) {
         !isPendingTeam(homeTeam) &&
         !isPendingTeam(awayTeam) &&
         (!previousWinners.length || Boolean(previousWinners[index * 2] && previousWinners[index * 2 + 1]));
-      const selectedTeamId = picks[match.id];
+      const selectedTeamId = useActualWinners ? getMatchWinnerTeamId(match, homeTeam, awayTeam) : picks[match.id];
 
       displayMatches.push({
         match,
@@ -1442,6 +1492,7 @@ function KnockoutTeamButton({
 }
 
 function BracketPanel({
+  drafts,
   initialKnockoutSubmission,
   knockoutSaveError,
   knockoutSaved,
@@ -1453,6 +1504,7 @@ function BracketPanel({
   readOnly = true,
   showTabs = true,
 }: {
+  drafts?: Record<string, StoredPrediction>;
   initialKnockoutSubmission?: KnockoutSubmission;
   knockoutSaveError?: string;
   knockoutSaved: boolean;
@@ -1484,8 +1536,8 @@ function BracketPanel({
     () => initialKnockoutSubmission?.picks ?? {},
   );
   const knockoutDisplay = useMemo(
-    () => buildKnockoutDisplay(knockoutMatches, knockoutPicks),
-    [knockoutMatches, knockoutPicks],
+    () => buildKnockoutDisplay(knockoutMatches, knockoutPicks, readOnly),
+    [knockoutMatches, knockoutPicks, readOnly],
   );
   const hasKnockoutPicks = Object.keys(knockoutPicks).length > 0;
   const [currentTime, setCurrentTime] = useState(() => Date.now());
@@ -1588,7 +1640,7 @@ function BracketPanel({
             </h2>
             <div className="grid gap-4 lg:grid-cols-2">
               {activeGroupMatches.map((match) => (
-                <MatchResultTile key={match.id} locale={locale} match={match} />
+                <MatchResultTile draft={drafts?.[match.id]} key={match.id} locale={locale} match={match} />
               ))}
             </div>
           </div>
@@ -1668,6 +1720,7 @@ function BracketPanel({
                       return (
                         <div key={entry.match.id}>
                           <MatchResultTile
+                            draft={drafts?.[entry.match.id]}
                             locale={locale}
                             match={{
                               ...entry.match,
@@ -2271,6 +2324,7 @@ export function FantasyApp({
           {panel === "ranking" ? <RankingPanel leaderboard={leaderboard} locale={locale} /> : null}
           {panel === "bracket" ? (
             <BracketPanel
+              drafts={drafts}
               initialKnockoutSubmission={initialKnockoutSubmission}
               knockoutSaveError={knockoutSaveError}
               knockoutSaved={knockoutSaved}
