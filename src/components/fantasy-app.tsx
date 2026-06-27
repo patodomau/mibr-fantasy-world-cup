@@ -1110,6 +1110,7 @@ function GamesPanel({
   knockoutSaving,
   locale,
   onClearKnockoutDraft,
+  onLocaleChange,
   onSaveKnockout,
   savedDrafts,
   saveErrors,
@@ -1126,6 +1127,7 @@ function GamesPanel({
   knockoutSaving: boolean;
   locale: Locale;
   onClearKnockoutDraft: () => void;
+  onLocaleChange: (locale: Locale) => void;
   onSaveKnockout: (picks: Record<string, string>, championTeamId: string) => void;
   savedDrafts: Record<string, boolean>;
   saveErrors: Record<string, string | undefined>;
@@ -1263,9 +1265,12 @@ function GamesPanel({
               <X className="h-4 w-4" aria-hidden="true" />
             </button>
             <div className="pr-10">
-              <h2 className="text-xl font-black text-amber-100" id="knockout-notice-title">
-                {t.knockoutNoticeTitle}
-              </h2>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <h2 className="text-xl font-black text-amber-100" id="knockout-notice-title">
+                  {t.knockoutNoticeTitle}
+                </h2>
+                <LocaleToggle locale={locale} onLocaleChange={onLocaleChange} />
+              </div>
               <div className="mt-4 space-y-3 text-sm font-semibold leading-6 text-stone-200">
                 <p>{t.knockoutNoticeBody}</p>
                 <p>{t.knockoutNoticeFilter}</p>
@@ -1427,6 +1432,80 @@ function GamesPanel({
         </div>
       ) : null}
     </div>
+  );
+}
+
+function FlagMark({ locale }: { locale: Locale }) {
+  if (locale === "pt") {
+    return (
+      <span className="relative block h-5 w-7 overflow-hidden border border-white/25 bg-emerald-600">
+        <span className="absolute left-1/2 top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rotate-45 bg-yellow-300" />
+        <span className="absolute left-1/2 top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 bg-blue-700" />
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className="relative block h-5 w-7 overflow-hidden border border-white/25 bg-red-600"
+      style={{
+        backgroundImage: "repeating-linear-gradient(to bottom, #dc2626 0 2px, #f8fafc 2px 4px)",
+      }}
+    >
+      <span className="absolute left-0 top-0 h-3 w-3.5 bg-blue-800" />
+    </span>
+  );
+}
+
+function LocaleToggle({
+  className = "",
+  locale,
+  onLocaleChange,
+}: {
+  className?: string;
+  locale: Locale;
+  onLocaleChange: (locale: Locale) => void;
+}) {
+  const isPt = locale === "pt";
+
+  return (
+    <button
+      aria-label={isPt ? "Switch language to English" : "Trocar idioma para portugues"}
+      className={[
+        "relative h-11 w-32 shrink-0 overflow-hidden border border-white/15 bg-black/40 p-1 text-[0.65rem] font-black transition hover:border-amber-400/60",
+        className,
+      ].join(" ")}
+      onClick={() => onLocaleChange(isPt ? "en" : "pt")}
+      title={isPt ? "English" : "Portugues"}
+      type="button"
+    >
+      <span
+        className={[
+          "absolute left-1 top-1 h-9 w-[3.75rem] bg-amber-500 shadow-lg shadow-amber-950/40 transition-transform duration-200",
+          isPt ? "translate-x-0" : "translate-x-[3.75rem]",
+        ].join(" ")}
+      />
+      <span className="relative z-10 flex h-full items-center justify-between">
+        <span
+          className={[
+            "flex h-9 w-[3.75rem] items-center justify-center gap-1.5 transition",
+            isPt ? "text-stone-950" : "text-stone-300",
+          ].join(" ")}
+        >
+          <FlagMark locale="pt" />
+          <span>BRA</span>
+        </span>
+        <span
+          className={[
+            "flex h-9 w-[3.75rem] items-center justify-center gap-1.5 transition",
+            isPt ? "text-stone-300" : "text-stone-950",
+          ].join(" ")}
+        >
+          <FlagMark locale="en" />
+          <span>USA</span>
+        </span>
+      </span>
+    </button>
   );
 }
 
@@ -2326,6 +2405,15 @@ export function FantasyApp({
     }
   };
 
+  const changeLocale = (nextLocale: Locale) => {
+    if (nextLocale === locale) {
+      return;
+    }
+
+    setLocale(nextLocale);
+    void playLocaleSound(nextLocale);
+  };
+
   return (
     <div className="min-h-screen">
       <header className="fixed inset-x-0 top-0 z-30 border-b border-amber-500/20 bg-black/78 backdrop-blur">
@@ -2359,17 +2447,7 @@ export function FantasyApp({
             ) : null}
           </div>
           <div className="flex items-center gap-3">
-            <button
-              className="border border-white/15 bg-white/5 px-3 py-2 text-xs font-black text-stone-200 transition hover:border-amber-400"
-              onClick={() => {
-                const nextLocale = locale === "pt" ? "en" : "pt";
-                setLocale(nextLocale);
-                void playLocaleSound(nextLocale);
-              }}
-              type="button"
-            >
-              {locale === "pt" ? "PT-BR" : "EN"}
-            </button>
+            <LocaleToggle locale={locale} onLocaleChange={changeLocale} />
             <div className="flex items-center gap-2">
               {user.avatarUrl ? (
                 <Avatar className="h-9 w-9" label={user.displayLabel} src={user.avatarUrl} />
@@ -2459,6 +2537,7 @@ export function FantasyApp({
               locale={locale}
               matches={matches}
               onClearKnockoutDraft={() => setKnockoutSaved(false)}
+              onLocaleChange={changeLocale}
               onSaveDraft={(draft) => void saveDraft(draft)}
               onSaveKnockout={(picks, championTeamId) => void saveKnockout(picks, championTeamId)}
               saveErrors={saveErrors}
