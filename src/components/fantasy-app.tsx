@@ -1438,21 +1438,21 @@ function GamesPanel({
 function FlagMark({ locale }: { locale: Locale }) {
   if (locale === "pt") {
     return (
-      <span className="relative block h-6 w-8 overflow-hidden rounded-sm border border-white/30 bg-emerald-600 shadow-sm shadow-black/30">
-        <span className="absolute left-1/2 top-1/2 h-[1.125rem] w-[1.125rem] -translate-x-1/2 -translate-y-1/2 rotate-45 bg-yellow-300" />
-        <span className="absolute left-1/2 top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-blue-700" />
+      <span className="relative block h-5 w-7 overflow-hidden rounded-md border border-white/30 bg-emerald-600 shadow-sm shadow-black/30">
+        <span className="absolute left-1/2 top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rotate-45 bg-yellow-300" />
+        <span className="absolute left-1/2 top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-blue-700" />
       </span>
     );
   }
 
   return (
     <span
-      className="relative block h-6 w-8 overflow-hidden rounded-sm border border-white/30 bg-red-600 shadow-sm shadow-black/30"
+      className="relative block h-5 w-7 overflow-hidden rounded-md border border-white/30 bg-red-600 shadow-sm shadow-black/30"
       style={{
-        backgroundImage: "repeating-linear-gradient(to bottom, #dc2626 0 2px, #f8fafc 2px 4px)",
+        backgroundImage: "repeating-linear-gradient(to bottom, #dc2626 0 1.7px, #f8fafc 1.7px 3.4px)",
       }}
     >
-      <span className="absolute left-0 top-0 h-3.5 w-4 bg-blue-800" />
+      <span className="absolute left-0 top-0 h-3 w-3.5 bg-blue-800" />
     </span>
   );
 }
@@ -1471,8 +1471,10 @@ function LocaleToggle({
   return (
     <button
       aria-label={isPt ? "Switch language to English" : "Trocar idioma para portugues"}
+      aria-checked={!isPt}
+      role="switch"
       className={[
-        "relative h-11 w-24 shrink-0 overflow-hidden rounded-full border border-amber-500/25 bg-stone-950/80 p-1 transition hover:border-amber-400/70",
+        "group relative h-8 w-[4.75rem] shrink-0 overflow-hidden rounded-full border border-amber-500/25 bg-stone-950/75 shadow-inner shadow-black/50 transition-colors duration-300 hover:border-amber-400/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-300",
         className,
       ].join(" ")}
       onClick={() => onLocaleChange(isPt ? "en" : "pt")}
@@ -1481,23 +1483,23 @@ function LocaleToggle({
     >
       <span
         className={[
-          "absolute left-1 top-1 h-9 w-9 rounded-full border border-amber-300/70 bg-amber-500/95 shadow-lg shadow-amber-950/50 transition-transform duration-200",
-          isPt ? "translate-x-0" : "translate-x-[3.25rem]",
+          "absolute left-1 top-1 h-6 w-8 rounded-full border border-amber-300/60 bg-amber-500/80 shadow-lg shadow-amber-950/50 transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] group-active:scale-95",
+          isPt ? "translate-x-0" : "translate-x-9",
         ].join(" ")}
       />
-      <span className="relative z-10 flex h-full items-center justify-between px-1">
+      <span className="relative z-10 flex h-full items-center justify-between px-1.5">
         <span
           className={[
-            "flex h-9 w-9 items-center justify-center rounded-full transition",
-            isPt ? "opacity-100" : "opacity-60 grayscale",
+            "flex h-6 w-8 items-center justify-center transition duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
+            isPt ? "scale-100 opacity-100" : "scale-95 opacity-45 grayscale",
           ].join(" ")}
         >
           <FlagMark locale="pt" />
         </span>
         <span
           className={[
-            "flex h-9 w-9 items-center justify-center rounded-full transition",
-            isPt ? "opacity-60 grayscale" : "opacity-100",
+            "flex h-6 w-8 items-center justify-center transition duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
+            isPt ? "scale-95 opacity-45 grayscale" : "scale-100 opacity-100",
           ].join(" ")}
         >
           <FlagMark locale="en" />
