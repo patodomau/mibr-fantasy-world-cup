@@ -1214,12 +1214,18 @@ function GamesPanel({
     secondTeamFilter === "all" || teamOptions.some((team) => team.id === secondTeamFilter)
       ? secondTeamFilter
       : "all";
+  const hasKnockoutBaseMatches = baseMatches.some((match) => isKnockoutStage(match.stage));
+  const hasIndividualBaseMatches = baseMatches.some((match) => !isKnockoutStage(match.stage));
+  const showingKnockoutPicker =
+    activeStageFilter === "knockout" ||
+    (activeStageFilter === "all" && hasKnockoutBaseMatches && !hasIndividualBaseMatches);
   const visibleMatches = useMemo(
     () => {
       const filteredMatches = baseMatches.filter(
         (match) => {
           const matchTeamIds = new Set([match.homeTeam.id, match.awayTeam.id]);
           return (
+            !isKnockoutStage(match.stage) &&
             matchPassesStageFilter(match, activeStageFilter) &&
             (activeFirstTeamFilter === "all" || matchTeamIds.has(activeFirstTeamFilter)) &&
             (activeSecondTeamFilter === "all" || matchTeamIds.has(activeSecondTeamFilter)) &&
@@ -1238,8 +1244,6 @@ function GamesPanel({
         ? t.noOpenGames
         : t.noClosedGames
       : t.noFilteredGames;
-  const showingKnockoutPicker =
-    gamesTab === "open" && activeStageFilter === "knockout";
 
   return (
     <div className="space-y-6">
@@ -1391,7 +1395,7 @@ function GamesPanel({
           matches={matches}
           onClearKnockoutDraft={onClearKnockoutDraft}
           onSaveKnockout={onSaveKnockout}
-          readOnly={false}
+          readOnly={gamesTab !== "open"}
           showTabs={false}
         />
       ) : null}
