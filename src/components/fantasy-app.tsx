@@ -1,6 +1,6 @@
 "use client";
 
-import { Brackets, Check, ChevronDown, Gamepad2, RefreshCw, Settings, Trophy, X } from "lucide-react";
+import { Brackets, Check, ChevronDown, Gamepad2, Megaphone, RefreshCw, Settings, Trophy, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -62,6 +62,7 @@ const copy = {
     exactScore: "Placar exato",
     winnerPoints: "Vencedor",
     scorePoints: "Placar",
+    knockoutPoints: "Mata-mata",
     points: "Pontos",
     predictions: "Palpites",
     localTime: "Horario local",
@@ -139,6 +140,15 @@ const copy = {
     knockoutNoticeContact: "Qualquer duvida, entrar em contato com patodomau no Discord.",
     knockoutNoticeDismiss: "Nao mostrar novamente",
     knockoutNoticeClose: "Fechar aviso",
+    notifications: "Notificacoes",
+    notificationsTitle: "Notificacoes do fantasy",
+    noUnreadNotifications: "Nenhuma notificacao nova.",
+    bracketBugNoticeTitle: "Correcao da chave mata-mata",
+    bracketBugNoticeBody:
+      "Detectamos um bug na logica de montagem das etapas seguintes do mata-mata. A chave foi corrigida para seguir os cruzamentos oficiais por vencedor de jogo.",
+    bracketBugNoticeDeadline: "Por causa disso, o prazo de submissao da chave foi adiado em 24 horas.",
+    testSiteWarning: "SITE DE TESTE",
+    testSiteDetail: "Use apenas para validar mudancas antes de publicar em producao.",
     groupTable: "Jogos do grupo",
     rankingPlayer: "Jogador",
     errorChoose: "Escolha vencedor ou empate primeiro.",
@@ -163,6 +173,7 @@ const copy = {
     exactScore: "Exact score",
     winnerPoints: "Winner",
     scorePoints: "Score",
+    knockoutPoints: "Knockout",
     points: "Points",
     predictions: "Picks",
     localTime: "Local time",
@@ -240,6 +251,15 @@ const copy = {
     knockoutNoticeContact: "If you have any questions, contact patodomau on Discord.",
     knockoutNoticeDismiss: "Do not show again",
     knockoutNoticeClose: "Close notice",
+    notifications: "Notifications",
+    notificationsTitle: "Fantasy notifications",
+    noUnreadNotifications: "No new notifications.",
+    bracketBugNoticeTitle: "Knockout bracket fix",
+    bracketBugNoticeBody:
+      "We detected a bug in the logic that built the later knockout rounds. The bracket now follows the official winner-of-match paths.",
+    bracketBugNoticeDeadline: "Because of this, the bracket submission deadline was extended by 24 hours.",
+    testSiteWarning: "TEST SITE",
+    testSiteDetail: "Use only to validate changes before publishing to production.",
     groupTable: "Group games",
     rankingPlayer: "Player",
     errorChoose: "Choose a winner or draw first.",
@@ -272,6 +292,33 @@ const localeSounds: Record<Locale, string> = {
 };
 
 const knockoutNoticeStorageKey = "mibr-knockout-notice-dismissed-2026-06-27";
+const bracketBugNoticeStorageKey = "mibr-bracket-fix-deadline-notice-dismissed-2026-06-28";
+
+type FantasyNotification = {
+  id: string;
+  storageKey: string;
+  title: string;
+  body: string[];
+};
+
+function getFantasyNotifications(locale: Locale): FantasyNotification[] {
+  const t = copy[locale];
+
+  return [
+    {
+      id: "bracket-fix-deadline-2026-06-28",
+      storageKey: bracketBugNoticeStorageKey,
+      title: t.bracketBugNoticeTitle,
+      body: [t.bracketBugNoticeBody, t.bracketBugNoticeDeadline, t.knockoutNoticeContact],
+    },
+    {
+      id: "knockout-full-bracket-2026-06-27",
+      storageKey: knockoutNoticeStorageKey,
+      title: t.knockoutNoticeTitle,
+      body: [t.knockoutNoticeBody, t.knockoutNoticeFilter, t.knockoutNoticeContact],
+    },
+  ];
+}
 
 function paymentTone(paidEntry: boolean) {
   return paidEntry
@@ -439,7 +486,7 @@ function MatchResultTile({
         {formatDate(match.kickoffAt, locale)} / {match.venue}
         {summary ? ` - ${summary}` : ""}
       </div>
-      <div className="grid grid-cols-[minmax(0,1fr)_5.5rem_minmax(0,1fr)] items-center gap-3">
+      <div className="grid grid-cols-[minmax(0,1fr)_7.75rem_minmax(0,1fr)] items-center gap-3">
         <div
           className={[
             "flex min-w-0 items-center gap-3 border px-2 py-2",
@@ -462,9 +509,9 @@ function MatchResultTile({
         </div>
         <div
           className={[
-            "border px-2 py-2 text-center font-black",
+            "border px-2 py-2 text-center font-black leading-tight",
             hasActualScore(match)
-              ? "border-amber-500/35 bg-stone-950/80 text-sm text-amber-100"
+              ? "whitespace-nowrap border-amber-500/35 bg-stone-950/80 text-[0.8rem] text-amber-100"
               : "border-white/10 bg-white/5 text-sm text-stone-500",
           ].join(" ")}
         >
@@ -743,15 +790,6 @@ function isKnockoutBracketOpen(matches: Match[], now = new Date()) {
   return Boolean(lockAt && now.getTime() < new Date(lockAt).getTime());
 }
 
-function getFirstKnockoutKickoffTime(matches: Match[]) {
-  const kickoffTimes = matches
-    .filter((match) => isKnockoutStage(match.stage))
-    .map((match) => new Date(match.kickoffAt).getTime())
-    .filter((time) => Number.isFinite(time));
-
-  return kickoffTimes.length > 0 ? Math.min(...kickoffTimes) : undefined;
-}
-
 function isOpenInGamesTab(match: Match, matches: Match[]) {
   if (isKnockoutStage(match.stage)) {
     return hasResolvedTeams(match) && isKnockoutBracketOpen(matches);
@@ -789,6 +827,32 @@ function getPreferredOpenStageFilter(matches: Match[]): StageFilter {
   return matches.some((match) => isKnockoutStage(match.stage) && hasResolvedTeams(match)) ? "knockout" : "all";
 }
 
+function hasOpenGamesTabMatches(matches: Match[]) {
+  return matches.some((match) => hasResolvedTeams(match) && isOpenInGamesTab(match, matches));
+}
+
+function getPreferredGamesTab(matches: Match[]): GamesTab {
+  return hasOpenGamesTabMatches(matches) ? "open" : "closed";
+}
+
+function getPreferredStageFilter(matches: Match[], gamesTab: GamesTab): StageFilter {
+  if (gamesTab === "open") {
+    return getPreferredOpenStageFilter(matches);
+  }
+
+  const closedMatches = matches.filter(
+    (match) => hasResolvedTeams(match) && !isOpenInGamesTab(match, matches),
+  );
+  if (closedMatches.some((match) => isKnockoutStage(match.stage))) {
+    return "knockout";
+  }
+  if (closedMatches.some((match) => match.stage === "GROUP_STAGE")) {
+    return "GROUP_STAGE";
+  }
+
+  return "all";
+}
+
 function hasPoints(draft?: StoredPrediction): draft is PredictionResult {
   return Boolean(draft && "totalPoints" in draft);
 }
@@ -797,6 +861,7 @@ function getPredictionPoints(draft?: StoredPrediction) {
   return {
     winnerPoints: hasPoints(draft) ? draft.winnerPoints : 0,
     scorePoints: hasPoints(draft) ? draft.scorePoints : 0,
+    knockoutPoints: hasPoints(draft) ? (draft.knockoutPoints ?? 0) : 0,
     totalPoints: hasPoints(draft) ? draft.totalPoints : 0,
   };
 }
@@ -826,12 +891,11 @@ function formatPrediction(match: Match, draft: StoredPrediction | undefined, loc
 
 function formatActualScore(match: Match, locale: Locale) {
   if (Number.isInteger(match.homeScore) && Number.isInteger(match.awayScore)) {
-    const baseScore = `${match.homeScore} x ${match.awayScore}`;
     if (Number.isInteger(match.homePenaltyScore) && Number.isInteger(match.awayPenaltyScore)) {
-      return `${baseScore} (${match.homePenaltyScore} x ${match.awayPenaltyScore} pen.)`;
+      return `${match.homeScore} (${match.homePenaltyScore}) x (${match.awayPenaltyScore}) ${match.awayScore}`;
     }
 
-    return baseScore;
+    return `${match.homeScore} x ${match.awayScore}`;
   }
 
   return copy[locale].waitingResult;
@@ -1065,9 +1129,9 @@ function ClosedMatchCard({
 
         <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 border border-white/10 bg-black/20 p-3">
           <TeamBlock side={match.homeTeam} selected={match.winner === "home"} />
-          <div className="min-w-20 text-center">
+          <div className="min-w-28 text-center">
             <div className="text-xs font-bold uppercase text-stone-500">{t.finalResult}</div>
-            <div className="mt-1 text-xl font-black text-amber-100">
+            <div className="mt-1 whitespace-nowrap text-lg font-black text-amber-100">
               {formatActualScore(match, locale)}
             </div>
           </div>
@@ -1110,7 +1174,6 @@ function GamesPanel({
   knockoutSaving,
   locale,
   onClearKnockoutDraft,
-  onLocaleChange,
   onSaveKnockout,
   savedDrafts,
   saveErrors,
@@ -1127,7 +1190,6 @@ function GamesPanel({
   knockoutSaving: boolean;
   locale: Locale;
   onClearKnockoutDraft: () => void;
-  onLocaleChange: (locale: Locale) => void;
   onSaveKnockout: (picks: Record<string, string>, championTeamId: string) => void;
   savedDrafts: Record<string, boolean>;
   saveErrors: Record<string, string | undefined>;
@@ -1136,46 +1198,18 @@ function GamesPanel({
   onSaveDraft: (draft: PredictionDraft) => void;
   setSavedDrafts: (drafts: Record<string, boolean>) => void;
 }) {
-  const [gamesTab, setGamesTab] = useState<GamesTab>("open");
+  const [gamesTab, setGamesTab] = useState<GamesTab>(() => getPreferredGamesTab(matches));
   const [dateSort, setDateSort] = useState<DateSort>("asc");
   const preferredOpenStageFilter = useMemo(() => getPreferredOpenStageFilter(matches), [matches]);
-  const [stageFilter, setStageFilter] = useState<StageFilter>(() => getPreferredOpenStageFilter(matches));
+  const [stageFilter, setStageFilter] = useState<StageFilter>(() =>
+    getPreferredStageFilter(matches, getPreferredGamesTab(matches)),
+  );
   const [firstTeamFilter, setFirstTeamFilter] = useState("all");
   const [secondTeamFilter, setSecondTeamFilter] = useState("all");
   const [openTimeRangeOnly, setOpenTimeRangeOnly] = useState(false);
   const [closedTimeRangeOnly, setClosedTimeRangeOnly] = useState(false);
-  const [currentTime, setCurrentTime] = useState(() => Date.now());
-  const [knockoutNoticeReady, setKnockoutNoticeReady] = useState(false);
-  const [knockoutNoticeHidden, setKnockoutNoticeHidden] = useState(false);
-  const [knockoutNoticePrevented, setKnockoutNoticePrevented] = useState(false);
   const t = copy[locale];
-  const firstKnockoutKickoffTime = useMemo(() => getFirstKnockoutKickoffTime(matches), [matches]);
-  const showKnockoutNotice =
-    knockoutNoticeReady &&
-    !knockoutNoticeHidden &&
-    !knockoutNoticePrevented &&
-    Boolean(firstKnockoutKickoffTime && currentTime < firstKnockoutKickoffTime);
   const timeRangeOnly = gamesTab === "open" ? openTimeRangeOnly : closedTimeRangeOnly;
-
-  useEffect(() => {
-    const timeout = window.setTimeout(() => {
-      setKnockoutNoticePrevented(window.localStorage.getItem(knockoutNoticeStorageKey) === "true");
-      setKnockoutNoticeReady(true);
-    }, 0);
-
-    return () => window.clearTimeout(timeout);
-  }, []);
-
-  useEffect(() => {
-    const interval = window.setInterval(() => setCurrentTime(Date.now()), 30000);
-    return () => window.clearInterval(interval);
-  }, []);
-
-  const preventKnockoutNotice = () => {
-    window.localStorage.setItem(knockoutNoticeStorageKey, "true");
-    setKnockoutNoticePrevented(true);
-    setKnockoutNoticeHidden(true);
-  };
 
   const baseMatches = useMemo(
     () =>
@@ -1247,60 +1281,6 @@ function GamesPanel({
 
   return (
     <div className="space-y-6">
-      {showKnockoutNotice ? (
-        <div
-          aria-labelledby="knockout-notice-title"
-          aria-modal="true"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/76 px-4 py-6 backdrop-blur-sm"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) {
-              setKnockoutNoticeHidden(true);
-            }
-          }}
-          role="dialog"
-        >
-          <div className="relative w-full max-w-lg border border-amber-400/35 bg-stone-950 p-5 shadow-2xl shadow-black/60">
-            <button
-              aria-label={t.knockoutNoticeClose}
-              className="absolute right-3 top-3 flex h-9 w-9 items-center justify-center border border-white/10 bg-white/5 text-stone-300 transition hover:border-amber-400/60 hover:text-amber-100"
-              onClick={() => setKnockoutNoticeHidden(true)}
-              type="button"
-            >
-              <X className="h-4 w-4" aria-hidden="true" />
-            </button>
-            <div className="pr-10">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <h2 className="text-xl font-black text-amber-100" id="knockout-notice-title">
-                  {t.knockoutNoticeTitle}
-                </h2>
-                <LocaleToggle locale={locale} onLocaleChange={onLocaleChange} />
-              </div>
-              <div className="mt-4 space-y-3 text-sm font-semibold leading-6 text-stone-200">
-                <p>{t.knockoutNoticeBody}</p>
-                <p>{t.knockoutNoticeFilter}</p>
-                <p className="text-amber-200">{t.knockoutNoticeContact}</p>
-              </div>
-            </div>
-            <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-end">
-              <button
-                className="border border-white/15 bg-white/5 px-4 py-2 text-sm font-bold text-stone-200 transition hover:border-amber-400/50 hover:text-amber-100"
-                onClick={preventKnockoutNotice}
-                type="button"
-              >
-                {t.knockoutNoticeDismiss}
-              </button>
-              <button
-                className="border border-amber-400 bg-amber-500 px-4 py-2 text-sm font-black text-stone-950 transition hover:bg-amber-400"
-                onClick={() => setKnockoutNoticeHidden(true)}
-                type="button"
-              >
-                {t.knockoutNoticeClose}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
       <div className="flex flex-wrap gap-2">
         {(["open", "closed"] satisfies GamesTab[]).map((item) => (
           <button
@@ -1518,6 +1498,7 @@ function RankingPanel({ leaderboard, locale }: { leaderboard: LeaderboardEntry[]
             <th className="px-4 py-3">{t.points}</th>
             <th className="px-4 py-3">{t.winnerPoints}</th>
             <th className="px-4 py-3">{t.exactScore}</th>
+            <th className="px-4 py-3">{t.knockoutPoints}</th>
             <th className="px-4 py-3">{t.predictions}</th>
           </tr>
         </thead>
@@ -1567,6 +1548,14 @@ function RankingPanel({ leaderboard, locale }: { leaderboard: LeaderboardEntry[]
                 </div>
                 <div className="text-xs font-semibold text-stone-400" data-testid="ranking-score-points">
                   {entry.scorePoints} {t.pointsShort}
+                </div>
+              </td>
+              <td className="px-4 py-3">
+                <div className="font-bold text-stone-100" data-testid="ranking-knockout-scores">
+                  {entry.knockoutScores ?? 0} {(entry.knockoutScores ?? 0) === 1 ? t.winnerScoreHit : t.winnerScoreHits}
+                </div>
+                <div className="text-xs font-semibold text-stone-400" data-testid="ranking-knockout-points">
+                  {entry.knockoutPoints ?? 0} {t.pointsShort}
                 </div>
               </td>
               <td className="px-4 py-3" data-testid="ranking-predictions">
@@ -1622,22 +1611,93 @@ function compareKickoffThenId(left: Match, right: Match) {
   return new Date(left.kickoffAt).getTime() - new Date(right.kickoffAt).getTime() || left.id.localeCompare(right.id);
 }
 
+const knockoutMatchNumberBySourcePair = new Map<string, number>([
+  ["73-75", 90],
+  ["74-77", 89],
+  ["76-78", 91],
+  ["79-80", 92],
+  ["81-82", 94],
+  ["83-84", 93],
+  ["85-87", 96],
+  ["86-88", 95],
+  ["89-90", 97],
+  ["91-92", 99],
+  ["93-94", 98],
+  ["95-96", 100],
+  ["97-98", 101],
+  ["99-100", 102],
+  ["101-102", 104],
+]);
+
+function getSourceMatchNumbers(match: Match) {
+  return Array.from(match.id.matchAll(/WINNERMATCH(\d+)/gi), (source) => Number(source[1])).filter(Number.isInteger);
+}
+
+function getMatchNumber(match: Match) {
+  const sourceMatchNumbers = getSourceMatchNumbers(match);
+  if (sourceMatchNumbers.length >= 2) {
+    const mappedMatchNumber = knockoutMatchNumberBySourcePair.get(`${sourceMatchNumbers[0]}-${sourceMatchNumbers[1]}`);
+    if (mappedMatchNumber !== undefined) {
+      return mappedMatchNumber;
+    }
+  }
+
+  const matchNumber = match.id.match(/(?:FINAL_|MATCH)(\d+)(?!.*\d)/i);
+  return matchNumber ? Number(matchNumber[1]) : undefined;
+}
+
+function resolvePickedWinner(
+  match: Match,
+  homeTeam: Match["homeTeam"],
+  awayTeam: Match["awayTeam"],
+  picks: Record<string, string>,
+  useActualWinners: boolean,
+) {
+  const selectedTeamId = useActualWinners ? getMatchWinnerTeamId(match, homeTeam, awayTeam) : picks[match.id];
+
+  if (selectedTeamId === homeTeam.id) {
+    return homeTeam;
+  }
+  if (selectedTeamId === awayTeam.id) {
+    return awayTeam;
+  }
+
+  return undefined;
+}
+
 function buildKnockoutDisplay(matches: Match[], picks: Record<string, string>, useActualWinners = false) {
   const displayMatches: KnockoutDisplayMatch[] = [];
   let previousWinners: Match["homeTeam"][] = [];
+  const matchByNumber = new Map<number, Match>();
+  const winnerByMatchNumber = new Map<number, Match["homeTeam"]>();
+
+  for (const match of matches) {
+    const matchNumber = getMatchNumber(match);
+    if (matchNumber !== undefined) {
+      matchByNumber.set(matchNumber, match);
+    }
+  }
 
   for (const stage of stageOrder.filter((item) => item !== "GROUP_STAGE" && item !== "THIRD_PLACE")) {
     const stageMatches = matches.filter((match) => match.stage === stage).sort(compareKickoffThenId);
     const stageWinners: Match["homeTeam"][] = [];
 
     stageMatches.forEach((match, index) => {
-      const homeTeam = previousWinners[index * 2] ?? match.homeTeam;
-      const awayTeam = previousWinners[index * 2 + 1] ?? match.awayTeam;
+      const sourceMatchNumbers = getSourceMatchNumbers(match);
+      const resolvedHomeTeam = sourceMatchNumbers[0] ? winnerByMatchNumber.get(sourceMatchNumbers[0]) : undefined;
+      const resolvedAwayTeam = sourceMatchNumbers[1] ? winnerByMatchNumber.get(sourceMatchNumbers[1]) : undefined;
+      const hasSourceMatches = sourceMatchNumbers.some((matchNumber) => matchByNumber.has(matchNumber));
+      const homeTeam = resolvedHomeTeam ?? previousWinners[index * 2] ?? match.homeTeam;
+      const awayTeam = resolvedAwayTeam ?? previousWinners[index * 2 + 1] ?? match.awayTeam;
       const selectable =
         !isPendingTeam(homeTeam) &&
         !isPendingTeam(awayTeam) &&
-        (!previousWinners.length || Boolean(previousWinners[index * 2] && previousWinners[index * 2 + 1]));
+        (!hasSourceMatches ||
+          sourceMatchNumbers.length < 2 ||
+          Boolean(resolvedHomeTeam && resolvedAwayTeam) ||
+          Boolean(previousWinners[index * 2] && previousWinners[index * 2 + 1]));
       const selectedTeamId = useActualWinners ? getMatchWinnerTeamId(match, homeTeam, awayTeam) : picks[match.id];
+      const pickedWinner = selectable ? resolvePickedWinner(match, homeTeam, awayTeam, picks, useActualWinners) : undefined;
 
       displayMatches.push({
         match,
@@ -1647,11 +1707,11 @@ function buildKnockoutDisplay(matches: Match[], picks: Record<string, string>, u
         selectable,
       });
 
-      if (selectable) {
-        if (selectedTeamId === homeTeam.id) {
-          stageWinners.push(homeTeam);
-        } else if (selectedTeamId === awayTeam.id) {
-          stageWinners.push(awayTeam);
+      const matchNumber = getMatchNumber(match);
+      if (pickedWinner) {
+        stageWinners.push(pickedWinner);
+        if (matchNumber !== undefined) {
+          winnerByMatchNumber.set(matchNumber, pickedWinner);
         }
       }
     });
@@ -1975,7 +2035,7 @@ function BracketPanel({
                             {formatDate(entry.match.kickoffAt, locale)}
                           </div>
                           {hasActualScore(entry.match) ? (
-                            <div className="mt-1 text-[11px] font-black text-amber-200">
+                            <div className="mt-1 whitespace-nowrap text-[11px] font-black text-amber-200">
                               {formatActualScore(entry.match, locale)}
                             </div>
                           ) : null}
@@ -1995,6 +2055,127 @@ function BracketPanel({
           })}
         </>
       )}
+    </div>
+  );
+}
+
+function NotificationsDialog({
+  dismissedNotifications,
+  initialNotificationId,
+  locale,
+  onClose,
+  onLocaleChange,
+  onDismiss,
+}: {
+  dismissedNotifications: Set<string>;
+  initialNotificationId?: string;
+  locale: Locale;
+  onClose: () => void;
+  onLocaleChange: (locale: Locale) => void;
+  onDismiss: (storageKey: string) => void;
+}) {
+  const t = copy[locale];
+  const notifications = getFantasyNotifications(locale);
+  const initialIndex = Math.max(
+    0,
+    notifications.findIndex((notification) => notification.id === initialNotificationId),
+  );
+  const [activeIndex, setActiveIndex] = useState(initialIndex);
+  const activeNotification = notifications[Math.min(activeIndex, Math.max(0, notifications.length - 1))];
+  const activeNotificationDismissed = activeNotification
+    ? dismissedNotifications.has(activeNotification.storageKey)
+    : false;
+
+  return (
+    <div
+      aria-labelledby="notifications-title"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/76 px-4 py-6 backdrop-blur-sm"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+      role="dialog"
+    >
+      <div className="relative w-full max-w-xl border border-amber-400/35 bg-stone-950 p-5 shadow-2xl shadow-black/60">
+        <button
+          aria-label={t.knockoutNoticeClose}
+          className="absolute right-3 top-3 flex h-9 w-9 items-center justify-center border border-white/10 bg-white/5 text-stone-300 transition hover:border-amber-400/60 hover:text-amber-100"
+          onClick={onClose}
+          type="button"
+        >
+          <X className="h-4 w-4" aria-hidden="true" />
+        </button>
+        <div className="pr-10">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <h2 className="text-xl font-black text-amber-100" id="notifications-title">
+              {t.notificationsTitle}
+            </h2>
+            <LocaleToggle locale={locale} onLocaleChange={onLocaleChange} />
+          </div>
+          {notifications.length === 0 || !activeNotification ? (
+            <p className="mt-4 text-sm font-semibold text-stone-300">{t.noUnreadNotifications}</p>
+          ) : (
+            <article className="mt-4 border border-amber-500/25 bg-amber-500/8 p-4">
+              <div className="flex items-start gap-3">
+                <Megaphone className="mt-0.5 h-5 w-5 shrink-0 text-amber-200" aria-hidden="true" />
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-black uppercase tracking-[0.16em] text-stone-400">
+                    {activeIndex + 1} / {notifications.length}
+                  </div>
+                  <h3 className="mt-1 text-base font-black text-amber-100">{activeNotification.title}</h3>
+                  <div className="mt-2 space-y-2 text-sm font-semibold leading-6 text-stone-200">
+                    {activeNotification.body.map((paragraph) => (
+                      <p key={paragraph}>{paragraph}</p>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </article>
+          )}
+        </div>
+        <div className="mt-5 flex flex-wrap justify-end gap-2">
+          {notifications.length > 1 ? (
+            <>
+              <button
+                className="border border-white/15 bg-white/5 px-4 py-2 text-sm font-bold text-stone-200 transition hover:border-amber-400/50 disabled:text-stone-600"
+                disabled={activeIndex <= 0}
+                onClick={() => setActiveIndex((index) => Math.max(0, index - 1))}
+                type="button"
+              >
+                {t.previous}
+              </button>
+              <button
+                className="border border-white/15 bg-white/5 px-4 py-2 text-sm font-bold text-stone-200 transition hover:border-amber-400/50 disabled:text-stone-600"
+                disabled={activeIndex >= notifications.length - 1}
+                onClick={() => setActiveIndex((index) => Math.min(notifications.length - 1, index + 1))}
+                type="button"
+              >
+                {t.next}
+              </button>
+            </>
+          ) : null}
+          {activeNotification && !activeNotificationDismissed ? (
+            <button
+              className="border border-white/15 bg-white/5 px-4 py-2 text-sm font-bold text-stone-200 transition hover:border-amber-400/50 hover:text-amber-100"
+              onClick={() => {
+                onDismiss(activeNotification.storageKey);
+              }}
+              type="button"
+            >
+              {t.knockoutNoticeDismiss}
+            </button>
+          ) : null}
+          <button
+            className="border border-amber-400 bg-amber-500 px-4 py-2 text-sm font-black text-stone-950 transition hover:bg-amber-400"
+            onClick={onClose}
+            type="button"
+          >
+            {t.knockoutNoticeClose}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -2289,11 +2470,24 @@ export function FantasyApp({
   const [knockoutSaving, setKnockoutSaving] = useState(false);
   const [knockoutSaved, setKnockoutSaved] = useState(Boolean(initialKnockoutSubmission));
   const [knockoutSaveError, setKnockoutSaveError] = useState<string | undefined>();
+  const [dismissedNotificationKeys, setDismissedNotificationKeys] = useState<Set<string>>(() => new Set());
+  const [notificationsReady, setNotificationsReady] = useState(false);
+  const [notificationsDropdownOpen, setNotificationsDropdownOpen] = useState(false);
+  const [showNotificationsDialog, setShowNotificationsDialog] = useState(false);
+  const [notificationsAutoShown, setNotificationsAutoShown] = useState(false);
+  const [activeNotificationId, setActiveNotificationId] = useState<string | undefined>();
+  const [isStageSite, setIsStageSite] = useState(false);
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioBuffersRef = useRef<Map<string, AudioBuffer>>(new Map());
   const t = copy[locale];
   const isAdmin = user.role === "owner" || user.role === "admin";
   const panels: Panel[] = isAdmin ? ["games", "ranking", "bracket", "admin"] : ["games", "ranking", "bracket"];
+  const notifications = useMemo(() => getFantasyNotifications(locale), [locale]);
+  const unreadNotifications = useMemo(
+    () => notifications.filter((notification) => !dismissedNotificationKeys.has(notification.storageKey)),
+    [dismissedNotificationKeys, notifications],
+  );
+  const hasUnreadNotifications = unreadNotifications.length > 0;
   const drafts = useMemo(() => ({ ...initialDrafts, ...draftOverrides }), [draftOverrides, initialDrafts]);
   const persistedMatchIds = useMemo(
     () => new Set([...Object.keys(initialDrafts), ...localPersistedMatchIds]),
@@ -2315,6 +2509,47 @@ export function FantasyApp({
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
   }, [router]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setDismissedNotificationKeys(
+        new Set(
+          getFantasyNotifications(locale)
+            .filter((notification) => window.localStorage.getItem(notification.storageKey) === "true")
+            .map((notification) => notification.storageKey),
+        ),
+      );
+      setNotificationsReady(true);
+      setIsStageSite(window.location.hostname.includes("stage"));
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, [locale]);
+
+  useEffect(() => {
+    if (!notificationsReady || !hasUnreadNotifications || showNotificationsDialog || notificationsAutoShown) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setActiveNotificationId(unreadNotifications[0]?.id);
+      setShowNotificationsDialog(true);
+      setNotificationsAutoShown(true);
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, [hasUnreadNotifications, notificationsAutoShown, notificationsReady, showNotificationsDialog, unreadNotifications]);
+
+  const dismissNotification = (storageKey: string) => {
+    window.localStorage.setItem(storageKey, "true");
+    setDismissedNotificationKeys((current) => new Set(current).add(storageKey));
+  };
+
+  const openNotification = (notificationId?: string) => {
+    setActiveNotificationId(notificationId);
+    setNotificationsDropdownOpen(false);
+    setShowNotificationsDialog(true);
+  };
 
   const saveDraft = async (draft: PredictionDraft) => {
     setSavingDrafts((current) => ({ ...current, [draft.matchId]: true }));
@@ -2412,7 +2647,22 @@ export function FantasyApp({
 
   return (
     <div className="min-h-screen">
+      {showNotificationsDialog ? (
+        <NotificationsDialog
+          dismissedNotifications={dismissedNotificationKeys}
+          initialNotificationId={activeNotificationId}
+          locale={locale}
+          onClose={() => setShowNotificationsDialog(false)}
+          onLocaleChange={changeLocale}
+          onDismiss={dismissNotification}
+        />
+      ) : null}
       <header className="fixed inset-x-0 top-0 z-30 border-b border-amber-500/20 bg-black/78 backdrop-blur">
+        {isStageSite ? (
+          <div className="border-b border-red-400/50 bg-red-600 px-4 py-1 text-center text-xs font-black uppercase tracking-[0.18em] text-white">
+            {t.testSiteWarning} - {t.testSiteDetail}
+          </div>
+        ) : null}
         <div className="flex h-16 items-center justify-between px-4 md:px-6">
           <div className="flex items-center gap-4">
             <div className="border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xl font-black text-amber-100">
@@ -2443,6 +2693,60 @@ export function FantasyApp({
             ) : null}
           </div>
           <div className="flex items-center gap-3">
+            <div className="relative">
+              <button
+                aria-expanded={notificationsDropdownOpen}
+                aria-label={t.notifications}
+                className={[
+                  "relative flex h-10 w-10 items-center justify-center border transition",
+                  hasUnreadNotifications
+                    ? "border-amber-300 bg-amber-500/18 text-amber-100 shadow-[0_0_18px_rgba(245,158,11,0.26)]"
+                    : "border-white/10 bg-white/5 text-stone-500 hover:border-amber-500/40 hover:text-stone-300",
+                ].join(" ")}
+                onClick={() => setNotificationsDropdownOpen((open) => !open)}
+                title={t.notifications}
+                type="button"
+              >
+                <Megaphone className="h-5 w-5" aria-hidden="true" />
+                {hasUnreadNotifications ? (
+                  <span className="absolute -right-1 -top-1 h-3 w-3 rounded-full border border-black bg-red-500" />
+                ) : null}
+              </button>
+              {notificationsDropdownOpen ? (
+                <div className="absolute right-0 top-12 w-80 border border-amber-500/25 bg-stone-950 p-2 shadow-2xl shadow-black/60">
+                  <div className="border-b border-white/10 px-2 pb-2 text-xs font-black uppercase tracking-[0.16em] text-amber-200">
+                    {t.notifications}
+                  </div>
+                  {notifications.length > 0 ? (
+                    <div className="mt-2 space-y-1">
+                      {notifications.map((notification) => {
+                        const unread = !dismissedNotificationKeys.has(notification.storageKey);
+                        return (
+                        <button
+                          className={[
+                            "block w-full border px-3 py-2 text-left text-sm font-bold transition hover:border-amber-400/50 hover:bg-amber-500/12",
+                            unread
+                              ? "border-amber-500/30 bg-amber-500/10 text-amber-100"
+                              : "border-white/10 bg-white/5 text-stone-300",
+                          ].join(" ")}
+                          key={notification.id}
+                          onClick={() => openNotification(notification.id)}
+                          type="button"
+                        >
+                          <span className="flex items-center justify-between gap-3">
+                            <span>{notification.title}</span>
+                            {unread ? <span className="h-2 w-2 shrink-0 rounded-full bg-red-500" /> : null}
+                          </span>
+                        </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="px-2 py-3 text-sm font-semibold text-stone-400">{t.noUnreadNotifications}</div>
+                  )}
+                </div>
+              ) : null}
+            </div>
             <LocaleToggle locale={locale} onLocaleChange={changeLocale} />
             <div className="flex items-center gap-2">
               {user.avatarUrl ? (
@@ -2456,7 +2760,10 @@ export function FantasyApp({
         </div>
       </header>
 
-      <aside className="fixed bottom-0 left-0 top-16 z-20 w-16 border-r border-amber-500/20 bg-black/62 transition-all duration-200 hover:w-52">
+      <aside
+        className="fixed bottom-0 left-0 z-20 w-16 border-r border-amber-500/20 bg-black/62 transition-all duration-200 hover:w-52"
+        style={{ top: isStageSite ? "5.5rem" : "4rem" }}
+      >
         <nav className="fantasy-scrollbar flex h-full flex-col gap-2 overflow-y-auto px-2 py-4">
           {panels.map((item) => (
             (() => {
@@ -2499,7 +2806,7 @@ export function FantasyApp({
         </nav>
       </aside>
 
-      <main className="pl-16 pt-16">
+      <main className="pl-16" style={{ paddingTop: isStageSite ? "5.5rem" : "4rem" }}>
         <section className="border-b border-amber-500/20 bg-black/24 px-4 py-6 md:px-8">
           <div className="mx-auto max-w-7xl">
             <p className="text-xs font-bold uppercase tracking-[0.32em] text-emerald-300">
@@ -2533,7 +2840,6 @@ export function FantasyApp({
               locale={locale}
               matches={matches}
               onClearKnockoutDraft={() => setKnockoutSaved(false)}
-              onLocaleChange={changeLocale}
               onSaveDraft={(draft) => void saveDraft(draft)}
               onSaveKnockout={(picks, championTeamId) => void saveKnockout(picks, championTeamId)}
               saveErrors={saveErrors}

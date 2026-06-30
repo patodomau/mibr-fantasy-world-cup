@@ -209,6 +209,8 @@ export function getScoreMatrixLeaderboard(): LeaderboardEntry[] {
       winnerScores: predictions.filter((prediction) => prediction.winnerPoints > 0).length,
       scorePoints: sum(predictions, "scorePoints"),
       exactScores: predictions.filter((prediction) => prediction.scorePoints > 0).length,
+      knockoutPoints: 0,
+      knockoutScores: 0,
       predictions: predictions.length,
     };
   });

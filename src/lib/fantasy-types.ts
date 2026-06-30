@@ -55,6 +55,7 @@ export type PredictionDraft = {
 export type PredictionResult = PredictionDraft & {
   winnerPoints: number;
   scorePoints: number;
+  knockoutPoints?: number;
   totalPoints: number;
 };
 
@@ -77,6 +78,8 @@ export type LeaderboardEntry = {
   winnerScores: number;
   scorePoints: number;
   exactScores: number;
+  knockoutPoints?: number;
+  knockoutScores?: number;
   predictions: number;
 };
 
@@ -134,11 +137,17 @@ export const KNOCKOUT_STAGES: readonly Stage[] = [
   "FINAL",
 ];
 
+export const KNOCKOUT_SUBMISSION_DEADLINE = "2026-06-29T19:00:00.000Z";
+
 export function isKnockoutStage(stage: Stage) {
   return KNOCKOUT_STAGES.includes(stage);
 }
 
 export function getKnockoutLockAt(matches: Match[]) {
+  if (matches.some((match) => isKnockoutStage(match.stage))) {
+    return KNOCKOUT_SUBMISSION_DEADLINE;
+  }
+
   const lockValues = matches
     .filter((match) => isKnockoutStage(match.stage))
     .map((match) => match.lockAt || match.kickoffAt)

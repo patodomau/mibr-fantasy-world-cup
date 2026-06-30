@@ -52,6 +52,11 @@ async function main() {
 
     const page = await browser.newPage({ viewport: { width: 1440, height: 1200 } });
     await page.goto(`${baseUrl}/score-matrix-test`, { waitUntil: "networkidle" });
+    await page.waitForTimeout(100);
+    const closeNotice = page.getByRole("button", { name: /Fechar aviso|Close notice/ });
+    if ((await closeNotice.count()) > 0) {
+      await closeNotice.last().click();
+    }
     await page.getByRole("button", { name: /^Ranking$/ }).click();
     await page.getByTestId("ranking-row-agg_all_exact").waitFor();
 
@@ -78,6 +83,8 @@ function row(
   scorePoints,
   exactScores,
   predictions,
+  knockoutPoints = 0,
+  knockoutScores = 0,
 ) {
   return {
     discordUserId,
@@ -87,13 +94,15 @@ function row(
     winnerScores,
     scorePoints,
     exactScores,
+    knockoutPoints,
+    knockoutScores,
     predictions,
   };
 }
 
 async function assertHeader(page) {
   const headerText = (await page.locator("thead").innerText()).toLowerCase();
-  for (const label of ["Pontos", "Vencedor", "Placar exato", "Palpites"]) {
+  for (const label of ["Pontos", "Vencedor", "Placar exato", "Mata-mata", "Palpites"]) {
     if (!headerText.includes(label.toLowerCase())) {
       throw new Error(`Ranking header is missing "${label}". Header was: ${headerText}`);
     }
@@ -111,6 +120,8 @@ async function assertRankingRow(page, expected) {
   await assertCell(rankingRow, "ranking-winner-points", `${expected.winnerPoints} pts`, expected);
   await assertCell(rankingRow, "ranking-exact-scores", exactLabel(expected.exactScores), expected);
   await assertCell(rankingRow, "ranking-score-points", `${expected.scorePoints} pts`, expected);
+  await assertCell(rankingRow, "ranking-knockout-scores", hitLabel(expected.knockoutScores ?? 0), expected);
+  await assertCell(rankingRow, "ranking-knockout-points", `${expected.knockoutPoints ?? 0} pts`, expected);
   await assertCell(rankingRow, "ranking-predictions", String(expected.predictions), expected);
 }
 

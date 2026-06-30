@@ -42,7 +42,9 @@ type EspnTeam = {
 type EspnCompetitor = {
   homeAway?: "home" | "away";
   score?: string;
+  shootoutScore?: number | string;
   team?: EspnTeam;
+  winner?: boolean;
 };
 
 type EspnEvent = {
@@ -321,6 +323,27 @@ function winnerFromScores(homeScore?: number | null, awayScore?: number | null):
   return "draw";
 }
 
+function winnerFromEspnCompetitors(
+  home: EspnCompetitor,
+  away: EspnCompetitor,
+  homeScore?: number | null,
+  awayScore?: number | null,
+): WinnerPick | undefined {
+  if (home.winner === true) {
+    return "home";
+  }
+  if (away.winner === true) {
+    return "away";
+  }
+
+  return winnerFromScores(homeScore, awayScore);
+}
+
+function parseOptionalScore(value: unknown) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) ? parsed : undefined;
+}
+
 function normalizeEspnStatus(status: EspnEvent["status"]): MatchStatus {
   const state = status?.type?.state;
   const name = status?.type?.name;
@@ -465,8 +488,10 @@ async function fetchEspnObservedMatches(
     const stage = stageFromEspnKickoff(kickoffAt);
     const status = normalizeEspnStatus(event.status);
     const hasMeaningfulScore = status !== "SCHEDULED";
-    const homeScore = hasMeaningfulScore ? Number(home.score) : undefined;
-    const awayScore = hasMeaningfulScore ? Number(away.score) : undefined;
+    const homeScore = hasMeaningfulScore ? parseOptionalScore(home.score) : undefined;
+    const awayScore = hasMeaningfulScore ? parseOptionalScore(away.score) : undefined;
+    const homePenaltyScore = hasMeaningfulScore ? parseOptionalScore(home.shootoutScore) : undefined;
+    const awayPenaltyScore = hasMeaningfulScore ? parseOptionalScore(away.shootoutScore) : undefined;
     const homeTeam = teamFromEspn(home.team);
     const awayTeam = teamFromEspn(away.team);
 
@@ -480,9 +505,11 @@ async function fetchEspnObservedMatches(
       homeTeam,
       awayTeam,
       status,
-      homeScore: Number.isInteger(homeScore) ? homeScore : undefined,
-      awayScore: Number.isInteger(awayScore) ? awayScore : undefined,
-      winner: winnerFromScores(homeScore, awayScore),
+      homeScore,
+      awayScore,
+      homePenaltyScore,
+      awayPenaltyScore,
+      winner: winnerFromEspnCompetitors(home, away, homeScore, awayScore),
       source: "espn-scoreboard",
       raw: event as unknown as Record<string, unknown>,
     });
