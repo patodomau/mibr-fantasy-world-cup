@@ -156,25 +156,15 @@ export const authOptions: NextAuthOptions = {
       );
 
       if (typeof token.discordId === "string" && token.discordId.trim() !== "") {
-        const hadFantasyAccess = Boolean(token.hasFantasyAccess);
         const authorizedUser = await resolveAuthorizedUser(token.discordId);
         const discordAvatarUrl =
           authorizedUser?.discordAvatarUrl ??
           getDiscordAvatarUrl(token.discordId, avatarHash) ??
           (typeof token.picture === "string" ? token.picture : undefined);
         token.mibrRole = authorizedUser?.role;
-        token.hasFantasyAccess = Boolean(authorizedUser);
         token.paidEntry = Boolean(authorizedUser?.paidEntry);
         token.displayLabel = displayLabel ?? authorizedUser?.displayLabel;
         token.discordAvatarUrl = discordAvatarUrl;
-
-        if (authorizedUser && !hadFantasyAccess) {
-          await upsertLoginProfile({
-            ...authorizedUser,
-            displayLabel: token.displayLabel ?? authorizedUser.displayLabel ?? token.discordId,
-            discordAvatarUrl,
-          });
-        }
 
         if (token.displayLabel) {
           token.name = token.displayLabel;
@@ -189,7 +179,6 @@ export const authOptions: NextAuthOptions = {
         session.user.displayLabel = token.displayLabel;
         session.user.mibrRole = token.mibrRole;
         session.user.discordAvatarUrl = token.discordAvatarUrl;
-        session.user.hasFantasyAccess = Boolean(token.hasFantasyAccess);
         session.user.paidEntry = Boolean(token.paidEntry);
 
         if (token.displayLabel) {
@@ -214,10 +203,6 @@ export async function requireFantasySession() {
   const session = await getAuthSession();
   if (!session?.user?.discordId) {
     redirect("/sign-in");
-  }
-
-  if (!session.user.hasFantasyAccess) {
-    redirect("/unauthorized");
   }
 
   return session;

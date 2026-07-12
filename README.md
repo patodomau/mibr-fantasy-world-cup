@@ -5,7 +5,7 @@ Private fantasy game for the `[MiBR] Made in Brazil` guild during the 2026 World
 The app is built for:
 
 - Discord login through `next-auth`
-- allowlist access by Discord user ID
+- access for any authenticated Discord user
 - Discord avatar capture for ranking/admin identification
 - Neon Postgres persistence under `mibr_fantasy_world_cup.*`
 - Vercel deployment and cron routes
@@ -55,6 +55,8 @@ MOCK_AUTH=true
 NEXTAUTH_SECRET=local-development-secret
 AUTHORIZED_DISCORD_USERS=193339239037927425:patodomau:owner,1248782223163916374:Ladock:admin
 ```
+
+`AUTHORIZED_DISCORD_USERS` assigns bootstrap roles for local development; it does not restrict site access.
 
 For production:
 
