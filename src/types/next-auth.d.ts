@@ -8,7 +8,6 @@ declare module "next-auth" {
       displayLabel?: string;
       discordAvatarUrl?: string;
       mibrRole?: AuthorizedRole;
-      hasFantasyAccess?: boolean;
       paidEntry?: boolean;
     };
   }
@@ -20,7 +19,6 @@ declare module "next-auth/jwt" {
     displayLabel?: string;
     discordAvatarUrl?: string;
     mibrRole?: AuthorizedRole;
-    hasFantasyAccess?: boolean;
     paidEntry?: boolean;
   }
 }

@@ -9,7 +9,7 @@ type SignInPageProps = {
 };
 
 const authErrorMessages: Record<string, string> = {
-  AccessDenied: "O Discord autenticou, mas o app recusou o acesso. Tente entrar novamente.",
+  AccessDenied: "O Discord autenticou, mas o login nao foi concluido. Tente novamente.",
   Configuration: "A configuracao de login em producao esta incompleta.",
   OAuthCallback: "O Discord voltou para o app, mas a callback de login falhou.",
   OAuthSignin: "Nao consegui iniciar o login com Discord.",
@@ -39,7 +39,7 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
           <p className="text-xs font-bold uppercase tracking-[0.28em] text-emerald-300">MiBR</p>
           <h1 className="mt-2 text-3xl font-black text-amber-100">Fantasy World Cup</h1>
           <p className="mt-3 text-sm text-stone-300">
-            Entre com Discord. Administradores podem remover acessos indevidos e marcar pagamento.
+            Entre com Discord para acessar o fantasy.
           </p>
           {errorMessage ? (
             <p className="mt-4 border border-red-400/40 bg-red-950/50 px-3 py-2 text-sm font-semibold text-red-100">
